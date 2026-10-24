@@ -1,0 +1,22 @@
+[project]
+name = "chudcode"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi==0.162.0",
+    "geopandas==1.2.0",
+    "httpx==0.28.1",
+    "networkx==3.7",
+    "numpy>=2.5.4",
+    "pandas>=3.1.0",
+    "pydantic==2.14.1",
+    "pyogrio==0.13.0",
+    "pyproj==3.8.0",
+    "pytorch-lightning>=2.6.6",
+    "react>=4.3.0",
+    "scikit-learn==1.9.1",
+    "scipy==1.18.1",
+    "shapely==2.2.0",
+    "torch>=2.14.1",
+    "uvicorn[standard]==0.54.0",
+]

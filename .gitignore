@@ -1,0 +1,9 @@
+/data
+/.aws
+/.idea
+/.vscode
+.env
+.venv/
+__pycache__/
+*.pyc
+/logs

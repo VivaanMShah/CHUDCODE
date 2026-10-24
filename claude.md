@@ -1,79 +1,98 @@
-# CLAUDE.md — Hackathon mode
+# CLAUDE.md — AI Outage Concierge (HackOHI/O 2026, AEP challenge)
 
-This repo is a 24-hour hackathon project. The goal is a working demo judges can see in 2-3 minutes, not production software. Optimize every decision for that.
+Backend for a Flutter mobile app that helps utility customers during a storm. A customer picks an anonymized location and a storm scenario. The API returns outage risk, a restoration time range, prep guidance, alert eligibility, and a customer message.
 
-## Priorities (in order)
+This is a 22-hour hackathon project. A focused, explainable prototype beats broad features. Judges must be able to change a scenario input and see the output change.
 
-1. **The demo works.** A feature that isn't demoable doesn't exist.
-2. **Speed.** Ship the simplest thing that works. Polish later, only if time allows.
-3. **Reliability during the demo.** It must not crash in front of judges.
-4. **Code quality.** Last. Readable is enough.
+## Current state
+
+- All 7 modules are built and running on real data (`data_mode: "live"`). Mock mode (`data.mock_store`) kicks in only if the data files are missing.
+- `app/models.py` is the API contract. A teammate is building the Flutter app against it right now.
+- `app/engine.py` orchestrates resolver → risk → restoration → rules → messages.
+- Missing from the data package: STORMS labor-hour and indirect-labor Excel files. Restoration uses labeled placeholders in `app/config.py` until they arrive.
+- Smoke test: `python -m tests.smoke_test`.
+
+## Run
+
+```bash
+pip install -r requirements.txt
+uvicorn app.main:app --reload      # docs at http://localhost:8000/docs
+```
+
+Deployed on AWS by the user, served over HTTPS. Don't change deploy config unless asked.
+
+## Hard rules (never break these)
+
+1. **Don't break the contract.** Never rename, remove, or change the type of a field in `app/models.py`. Adding optional fields is OK. If a change is truly needed, stop and tell me first so I can warn the frontend.
+2. **Ranges, never single numbers.** Restoration is always `low_hours` to `high_hours`.
+3. **Label model output vs confirmed facts.** Only real utility data goes in `confirmed`. Everything predicted goes in `model_estimate`.
+4. **The LLM never produces numbers.** It only rewords text built from structured JSON. Every number in an LLM output must be checked against the input JSON before returning; if any doesn't match, fall back to the template text.
+5. **Privacy.** Never return coordinates, precise sensitive-facility locations, personal data, employee info, or internal-only operational fields. A coarse "critical facility nearby: yes/no" is the most detail allowed.
+6. **Declared needs are opt-in only.** Never infer medical, accessibility, or critical-facility status.
+7. **Always have a fallback.** When confidence is low or data is missing, set `meta.fallback = true` with a clear `fallback_reason`.
+8. **Confidence must come from something real**: history volume, model spread, or a backtest. Never a hardcoded value once real data is in.
+9. **Every response includes `assumptions` and `limits`** in `meta`. Update them whenever logic changes.
+
+## API
+
+- `GET /health`
+- `GET /locations` — anonymized selectable locations
+- `POST /assess` — `location_id` + scenario (`storm_severity` 1-5, `damaged_poles`, `crews`, `access_ok`, `declared_needs[]`). Response sections: `confirmed`, `model_estimate`, `customer_actions`, `meta`.
+- `POST /message` — `location_id`, `message_type` (`pre_storm`, `outage_confirmed`, `estimate_updated`, `restoration_complete`), scenario.
+- Skip `/chat` unless everything else works.
+
+Full contract with examples is in `README.md`.
+
+## Stack
+
+Python, FastAPI, pydantic v2, pandas, geopandas, numpy, networkx, scikit-learn or LightGBM. LLM API for wording only. Add new dependencies to `requirements.txt` with pinned versions.
+
+## Data (organizer-provided, sanitized)
+
+Put files in `./data/` (gitignored). Inspect real schemas before writing code against them; column names in the brief may not match.
+
+| Source                      | Format    | Use                                                                                                                                     |
+| --------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| ARCOS damage assessment     | shapefile | Incident, region, circuit, substation, asset type, damage type, quantity, repair status/date, masked coords. Risk features and history. |
+| Circuit GIS extracts        | shapefile | Circuits, protective devices, relationships                                                                                             |
+| Upline flow / topology      | TXT       | Premise to upstream equipment. networkx graph.                                                                                          |
+| STORMS labor-hour reference | Excel     | Labor hours by damage type                                                                                                              |
+| Indirect labor assumptions  | Excel     | Travel and nonproductive multipliers                                                                                                    |
+| Priority locations          | shapefile | Hospitals, fire, ambulance. Never expose exact locations.                                                                               |
+| Structure diagrams          | PDF       | Low priority, ignore unless asked                                                                                                       |
+
+When inspecting data, report: columns, dtypes, row counts, null rates, join keys between files, and what's usable vs missing. Don't guess at a schema.
+
+## Modules to build (in this order)
+
+1. **Data loader** (`app/data.py`): load and cache all files at startup. Report schema problems clearly. App must still start if a file is missing; dependent features fall back.
+2. **ID resolver** (`app/resolver.py`): location ID → circuit, upstream device, nearby past damage.
+3. **Risk engine** (`app/risk.py`): band low/medium/high, real confidence, top 3 plain-English reasons. Logistic regression or LightGBM; weighted score if data is sparse.
+4. **Restoration engine** (`app/restoration.py`): labor hours × damage qty × travel mult × nonproductive mult ÷ crews. Monte Carlo over damage counts, travel delays, crew availability → 10th to 90th percentile range. Counterfactual deltas ("+2 crews → X to Y hours"). Recompute on damage, crews, or access changes.
+5. **Rules engine** (`app/rules.py`): prep tips and safety messages by risk band and duration, declared-need modifiers, alert eligibility with the rule named, channel, timing, escalation trigger.
+6. **Message generator** (`app/messages.py`): templates for the 4 message types. Optional LLM polish from structured JSON, then the number validator.
+7. **Safety layer** (`app/safety.py`): strip coords and sensitive fields from every response, input validation, fallback flag, audit log.
+
+When a real module replaces a mock, switch `data_mode` from `"mock"` to `"live"` for that path.
+
+## Unique features (after core works)
+
+1. Monte Carlo restoration range
+2. Counterfactual explanations in `factor_deltas`
+3. Message number validator
+4. Stretch only if data allows: blast radius / step restoration with networkx, backtested confidence on held-out events, storm replay mode, critical-facility-nearby flag
 
 ## How to work
 
-- Build the happy path first. Handle the error cases that could break the demo; skip the rest.
-- Don't over-engineer. No abstractions, design patterns, or config systems unless they save time right now.
-- Prefer libraries and APIs over writing things from scratch.
-- Use the stack the team already knows. Don't introduce a new framework mid-hackathon.
-- Hardcoding is fine: sample data, demo users, fixed config. Put it in one obvious place so it's easy to swap.
-- Mock or fake anything slow, flaky, paid, or blocked (APIs, auth, payments, bank data). Keep a toggle so the demo can run fully offline if wifi dies.
-- Make small, working changes. Don't do large refactors, especially after hour 16.
-- When there are two ways to do something, pick the faster one and say why in one line.
-- If a task will take more than ~30 minutes, say so before starting and suggest a cheaper version.
-- Don't write tests unless asked. A quick manual check or a tiny script that runs the core path is enough.
-- Ask before deleting files, rewriting large chunks of working code, or changing the project structure.
+- Keep endpoints fast (under ~300 ms). Load and precompute at startup, not per request. Fix Monte Carlo sample count and seed so the demo is repeatable.
+- Plain-English text for customers: short sentences, no jargon, no internal codes.
+- After each change, run the smoke test: hit every endpoint with a mild and a severe scenario and confirm outputs differ and nothing errors.
+- Commit after every working step. Never leave `main` broken.
+- If something will take more than ~30 minutes, say so and suggest a cheaper version.
+- Ask before deleting files or rewriting working modules.
 
-## Code conventions
+## Schedule
 
-- Keep files small and named by what they do (`news_fetch.py`, `Dashboard.tsx`).
-- Comments only where the logic isn't obvious.
-- Log clearly when something fails so we can debug fast at 3 AM.
-- Pin dependency versions. Update `requirements.txt` / `package.json` whenever you add one.
-
-## Secrets
-
-- API keys go in `.env`, never in code. Keep `.env` in `.gitignore`.
-- Maintain a `.env.example` with every key name and no values.
-- Never print keys in logs or commit them. If one gets committed, tell me immediately so I can rotate it.
-
-## Git
-
-- Commit after every working step with a short, clear message.
-- Never leave `main` broken. If something risky is in progress, use a branch.
-- Before any big change, make sure the current working state is committed so we can roll back.
-
-## Demo safety
-
-- Seed data must make the demo look good and run the same way every time.
-- Cache or save API responses used in the demo so a rate limit or outage can't kill it.
-- Show loading states instead of a frozen screen.
-- Hide or remove anything half-built before judging.
-
-## Time phases
-
-- **Hours 0-1:** Scope, repo setup, skeleton that runs.
-- **Hours 1-8:** Each piece works on its own with fake data.
-- **Hours 8-14:** Wire everything together end to end.
-- **Hours 14-20:** Fix bugs, then at most one stretch feature.
-- **Hours 20-24:** Code freeze. Bug fixes only. Record a backup demo video, write the README, practice the pitch.
-
-If I ask for a new feature after hour 20, remind me we're in code freeze and ask if I'm sure.
-
-## README (for Devpost and judges)
-
-Keep it updated. It needs:
-- One-line description of the project
-- The problem and who it's for
-- How it works (short)
-- Tech stack
-- How to run it locally
-- What was built during the hackathon vs. what was pre-existing (libraries, datasets, starter code). Be honest about this.
-
-## Project details
-
-<!-- Fill this in once the idea is locked -->
-- **Project:**
-- **One-liner:**
-- **Stack:**
-- **Run command:**
-- **Team / who owns what:**
+- Feature freeze at **hour 18**. After that, bug fixes only. If I ask for a new feature after hour 18, remind me.
+- Cut order if behind: stretch features first. **Never cut** the fallback, the restoration range, or scenario inputs.
+- Last hours: record a 3-minute demo video, update README.

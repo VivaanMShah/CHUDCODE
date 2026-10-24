@@ -1,0 +1,20 @@
+# API
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+# Data + models
+numpy==2.5.4
+pandas==3.1.0
+pyogrio==0.13.0
+shapely==2.2.0
+geopandas==1.2.0
+pyproj==3.8.0
+scikit-learn==1.9.1
+scipy==1.18.1
+networkx==3.7
+# Tests (FastAPI TestClient)
+httpx==0.28.1
+# Not used by the API (kept from the original list). Drop them for a much smaller deploy.
+torch==2.14.1
+pytorch-lightning==2.6.6
+react==4.3.0
