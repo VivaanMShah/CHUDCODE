@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Band, DeclaredNeed } from "../api/contract";
+import type { Band } from "../api/contract";
 import AboutEstimate from "../components/AboutEstimate";
 import RangeBar from "../components/RangeBar";
 import {
@@ -11,6 +11,7 @@ import {
   useAssessment,
 } from "../assessment";
 import { useLocation } from "../location";
+import { tipsFor, useProfile } from "../profile";
 import "./Home.css";
 
 interface HomeProps {
@@ -20,12 +21,6 @@ interface HomeProps {
 
 // Color is never the only signal: each band also has a symbol and a word.
 const BAND_ICON: Record<Band, string> = { low: "●", medium: "▲", high: "■" };
-
-const NEEDS: { id: DeclaredNeed; label: string }[] = [
-  { id: "medical_equipment", label: "I use medical equipment that needs power" },
-  { id: "accessibility", label: "I have mobility or accessibility needs" },
-  { id: "critical_facility", label: "I run a critical facility" },
-];
 
 const DEVICE_LABEL: Record<string, string> = {
   "circuit breaker": "Substation breaker",
@@ -46,15 +41,10 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
   const chain = data?.area?.upstream_chain ?? [];
   const liveOk = !!live && live.severity !== null;
   const weatherAlerts = live?.alerts ?? [];
-  const hasMedical = scenario.declared_needs.includes("medical_equipment");
 
-  const toggleNeed = (id: DeclaredNeed) => {
-    const on = scenario.declared_needs.includes(id);
-    updateScenario({
-      declared_needs: on ? scenario.declared_needs.filter((n) => n !== id) : [...scenario.declared_needs, id],
-      ...(id === "medical_equipment" && on ? { backup_hours: null } : {}),
-    });
-  };
+  const { profile, isEmpty, openSheet, promptDismissed, dismissPrompt } = useProfile();
+  const tips = tipsFor(profile, { severity: scenario.storm_severity, tempF: live?.hourly[0]?.temp_f ?? null });
+  const todo = [...tips, ...(data?.customer_actions.actions ?? [])].slice(0, 3);
 
   const updated = live ? new Date(live.updated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : null;
 
@@ -97,6 +87,17 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
         )}
         {!data && !error && (
           <div className="card"><p className="dim">{location ? "Loading your estimate…" : "Enter your ZIP to begin."}</p></div>
+        )}
+
+        {data && isEmpty && !promptDismissed && (
+          <section className="card prompt">
+            <strong>Make this fit you</strong>
+            <p>Optional and private. It takes about 30 seconds.</p>
+            <div className="row-links">
+              <button type="button" className="link" onClick={openSheet}>Add details</button>
+              <button type="button" className="link link--dim" onClick={dismissPrompt}>Not now</button>
+            </div>
+          </section>
         )}
 
         {data && est && meta && range && (
@@ -173,11 +174,12 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
               </div>
               <span className="eyebrow">Do these next</span>
               <ul className="todo">
-                {data.customer_actions.actions.slice(0, 3).map((a) => <li key={a}>{a}</li>)}
+                {todo.map((a) => <li key={a}>{a}</li>)}
               </ul>
               <div className="row-links">
                 <button type="button" className="link" onClick={onOpenPrepare}>Full checklist</button>
                 <button type="button" className="link" onClick={onOpenAlerts}>How we'd contact you</button>
+                <button type="button" className="link" onClick={openSheet}>About you</button>
               </div>
             </section>
           </>
@@ -240,30 +242,10 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
                 </button>
               </div>
 
-              <div className="scenario__row">
-                <div className="scenario__label">
-                  <span>Your needs (optional)</span>
-                  <small>We only use what you tell us. We never guess.</small>
-                </div>
-                <div className="chips">
-                  {NEEDS.map((n) => (
-                    <button key={n.id} type="button" aria-pressed={scenario.declared_needs.includes(n.id)}
-                      className={`chip${scenario.declared_needs.includes(n.id) ? " is-on" : ""}`}
-                      onClick={() => toggleNeed(n.id)}>{n.label}</button>
-                  ))}
-                </div>
-              </div>
-
-              {hasMedical && (
-                <label className="scenario__row">
-                  <div className="scenario__label">
-                    <span>How long does your backup power last?</span>
-                    <strong>{scenario.backup_hours == null ? "Not set" : `${scenario.backup_hours} h`}</strong>
-                  </div>
-                  <input type="range" min={1} max={72} value={scenario.backup_hours ?? 8}
-                    onChange={(e) => updateScenario({ backup_hours: Number(e.target.value) })} />
-                </label>
-              )}
+              <p className="details__small dim">
+                Medical equipment, backup power, and other needs are set in{" "}
+                <button type="button" className="link" onClick={openSheet}>About you</button>.
+              </p>
 
               <button type="button" className="link" onClick={resetScenario}>Reset</button>
             </div>

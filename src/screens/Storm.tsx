@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatRange, useAssessment } from "../assessment";
 import { useLocation } from "../location";
+import { tipsFor, useProfile } from "../profile";
 import "./Storm.css";
 
 // Prepare tab: the backend's prep actions as a checklist, plus safety messages.
@@ -19,7 +20,8 @@ function loadDone(): string[] {
 
 export default function Storm() {
   const { location } = useLocation();
-  const { data, error } = useAssessment();
+  const { data, error, live, scenario } = useAssessment();
+  const { profile } = useProfile();
   const [done, setDone] = useState<string[]>(loadDone);
   const [reporting, setReporting] = useState(false);
 
@@ -50,7 +52,9 @@ export default function Storm() {
     );
   }
 
-  const { actions, safety_messages } = data.customer_actions;
+  const { safety_messages } = data.customer_actions;
+  const tips = tipsFor(profile, { severity: scenario.storm_severity, tempF: live?.hourly[0]?.temp_f ?? null });
+  const actions = [...tips, ...data.customer_actions.actions];
   const range = data.model_estimate.restoration_range;
   const doneCount = actions.filter((a) => done.includes(a)).length;
 

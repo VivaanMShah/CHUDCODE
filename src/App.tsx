@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { AssessmentProvider, useAssessment } from "./assessment";
+import AboutMe from "./components/AboutMe";
 import BottomNav from "./components/BottomNav";
 import ZipPicker from "./components/ZipPicker";
 import { LocationProvider } from "./location";
+import { ProfileProvider } from "./profile";
 import Alerts from "./screens/Alerts";
 import Chat from "./screens/Chat";
 import Home from "./screens/Home";
@@ -29,6 +31,7 @@ function AppShell() {
 
       {/* Opens by itself on a first visit; any screen can reopen it. */}
       <ZipPicker />
+      <AboutMe />
     </div>
   );
 }
@@ -37,7 +40,9 @@ export default function App() {
   return (
     <LocationProvider>
       <AssessmentProvider>
-        <AppShell />
+        <ProfileProvider>
+          <AppShell />
+        </ProfileProvider>
       </AssessmentProvider>
     </LocationProvider>
   );

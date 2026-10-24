@@ -3,6 +3,7 @@ import { getMessage } from "../api/backend";
 import type { Band, MessageResponse, MessageType } from "../api/contract";
 import { CHANNEL_LABEL, bandLabel, useAssessment } from "../assessment";
 import { useLocation } from "../location";
+import { useProfile } from "../profile";
 import type { AlertSeverity, WeatherAlert } from "../types";
 import "./Alerts.css";
 
@@ -91,6 +92,7 @@ function loadPush(): boolean {
 export default function Alerts() {
   const { location } = useLocation();
   const { scenario, data, error, live } = useAssessment();
+  const { profile } = useProfile();
   const [open, setOpen] = useState(true);
   const [pushEnabled, setPushEnabled] = useState(loadPush);
 
@@ -211,6 +213,17 @@ export default function Alerts() {
               <span>We'd reach you by</span>
               <strong>{CHANNEL_LABEL[acts.channel] ?? acts.channel}</strong>
             </li>
+            {profile.contact && (
+              <li>
+                <span>You asked us to contact you by</span>
+                <strong>
+                  {CHANNEL_LABEL[profile.contact]}
+                  {profile.needs.includes("medical_equipment") && profile.contact !== "phone_call"
+                    ? " (we would still call because you use medical equipment)"
+                    : ""}
+                </strong>
+              </li>
+            )}
             <li>
               <span>When</span>
               <strong>{acts.send_timing}</strong>

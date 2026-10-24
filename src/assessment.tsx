@@ -191,7 +191,8 @@ export function AssessmentProvider({ children }: { children: ReactNode }) {
     setBase((s) => ({ ...s, ...patch }));
   }, []);
   const resetScenario = useCallback(() => {
-    setBase(DEFAULT_SCENARIO);
+    // Keep the person's declared needs: they come from About you, not the simulator.
+    setBase((b) => ({ ...DEFAULT_SCENARIO, declared_needs: b.declared_needs, backup_hours: b.backup_hours }));
     setUseLive(true);
   }, []);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);

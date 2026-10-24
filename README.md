@@ -292,6 +292,7 @@ React app in `src/`, wired to this API:
 | Radar | Forecast illustration drawn from the hourly forecast (not real radar imagery): play and scrub 12 hours, Rain and Wind layers, tap a spot for conditions, and a "Need help?" panel (911, the power company, find a hospital, find a shelter) |
 | Alerts | Real NWS alerts, the outage alert rule and escalation, and the 4-stage message timeline with "Verified numbers" |
 | Prepare | Checklist, safety messages, downed-line guidance (demo, no reporting) |
+| About you | Optional sheet (Home, after choosing a ZIP): household, home type, well pump, electric heat, generator, power needs, preferred contact. Saved on the device only. Tailors the tips and contact line. Only power needs and backup hours are sent with an estimate |
 | Chat | Sample replies only. Reserved for the Bedrock chatbot |
 
 - API layer: `src/api/backend.ts`, types in `src/api/contract.ts`, contact numbers in `src/config.ts` (the power company line is the Appalachian Power Virginia outage number).
