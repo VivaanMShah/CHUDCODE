@@ -9,7 +9,7 @@ import time
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.messages import validate
+from app.assistant import validate
 
 MILD = {"storm_severity": 1, "damaged_poles": 0, "crews": 4, "access_ok": True, "declared_needs": []}
 SEVERE = {"storm_severity": 5, "damaged_poles": 12, "crews": 2, "access_ok": False,

@@ -1,18 +1,61 @@
-"""Create (or reuse) every AWS resource the app needs. Safe to run again: it only creates what is missing.
+"""Host the app on AWS (ECS + ECR + load balancer + CloudFront). Credentials come from .env or the environment.
 
-    python -m deploy.aws_setup
-
-Creates: a second subnet, security groups, an ECR repository, an S3 bucket for build sources,
-log groups, three IAM roles, a CodeBuild project (builds the Docker image, because this PC has no
-Docker), an Application Load Balancer, and an ECS cluster. The ECS service itself is created by
-deploy.py after the first image exists.
+  python deploy.py          build the image in AWS, roll it out, print the link (run after any change)
+  python deploy.py setup    only create the AWS resources (safe to repeat)
 """
-import json
-import time
+from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
+import io
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.request
+import zipfile
+
+import boto3
 import botocore.exceptions as bx
 
-from .common import NAME, REGION, account_id, client, load_env, say
+
+# ============================================================================
+# SHARED HELPERS
+# Shared helpers for the AWS scripts. Credentials come from .env or the environment and are never printed.
+# ============================================================================
+
+ROOT = Path(__file__).resolve().parent
+NAME = "outage-concierge"
+REGION = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "us-east-1"
+
+
+def load_env() -> None:
+    env = ROOT / ".env"
+    if not env.exists():
+        return
+    for line in env.read_text(encoding="utf-8").splitlines():
+        m = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$", line)
+        if m and m.group(1) not in os.environ:
+            os.environ[m.group(1)] = m.group(2).strip("\"'")
+
+
+def client(service: str):
+    return boto3.client(service, region_name=REGION)
+
+
+def account_id() -> str:
+    return client("sts").get_caller_identity()["Account"]
+
+
+def say(msg: str) -> None:
+    print(msg, flush=True)
+
+# ============================================================================
+# AWS RESOURCES (created if missing)
+# Create (or reuse) every AWS resource the app needs. Safe to run again: it only creates what is missing.
+# ============================================================================
 
 PORT = 8000
 
@@ -212,10 +255,172 @@ def ensure_all() -> dict:
     say("Ready.")
     return res
 
+# ============================================================================
+# BUILD AND ROLL OUT
+# Build the Docker image in AWS, then roll it out to ECS. Run this after any change:
+# ============================================================================
 
-if __name__ == "__main__":
+BUILDSPEC = """version: 0.2
+phases:
+  pre_build:
+    commands:
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+  build:
+    commands:
+      - docker build -t $REPO_URI:$IMAGE_TAG -t $REPO_URI:latest .
+  post_build:
+    commands:
+      - docker push $REPO_URI:$IMAGE_TAG
+      - docker push $REPO_URI:latest
+"""
+
+TOP_FILES = ["Dockerfile", ".dockerignore", "requirements-prod.txt", "package.json", "package-lock.json",
+             "tsconfig.json", "vite.config.ts", "index.html"]
+SKIP = {"__pycache__"}
+
+
+def make_zip() -> bytes:
+    store = ROOT / "data" / "_cache" / "store.pkl"
+    if not store.exists():
+        sys.exit("No processed data found. Run `python -m app.data` once first (it needs the data/ folder).")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in TOP_FILES:
+            z.write(ROOT / f, f)
+        for folder in ("app", "src", "public"):
+            for p in (ROOT / folder).rglob("*"):
+                rel = p.relative_to(ROOT).as_posix()
+                if not p.is_file() or SKIP & set(p.parts) or p.suffix == ".pyc" or rel == "src/main.py":
+                    continue
+                z.write(p, rel)
+        z.write(store, "bundle/store.pkl")  # processed data only (about 150 KB), not the raw files
+        z.writestr("buildspec.yml", BUILDSPEC)
+    return buf.getvalue()
+
+
+def git_short() -> str:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, text=True).strip()
+    except Exception:  # noqa: BLE001
+        return "local"
+
+
+def build_image(res: dict, tag: str) -> None:
+    data = make_zip()
+    say(f"Uploading source ({len(data) / 1024:.0f} KB)")
+    client("s3").put_object(Bucket=res["bucket"], Key="source/source.zip", Body=data)
+    cb = client("codebuild")
+    env = [{"name": "REPO_URI", "value": res["repo_uri"]}, {"name": "IMAGE_TAG", "value": tag},
+           {"name": "ECR_REGISTRY", "value": res["repo_uri"].split("/")[0]}]
+    build_id = cb.start_build(projectName=NAME, environmentVariablesOverride=env)["build"]["id"]
+    say(f"Building image {tag} in AWS (about 3 to 6 minutes)")
+    last = ""
+    while True:
+        b = cb.batch_get_builds(ids=[build_id])["builds"][0]
+        phase = b.get("currentPhase", "")
+        if phase != last:
+            say(f"  {phase}")
+            last = phase
+        if b["buildStatus"] != "IN_PROGRESS":
+            break
+        time.sleep(10)
+    if b["buildStatus"] != "SUCCEEDED":
+        say(f"Build {b['buildStatus']}. Last log lines:")
+        try:
+            ev = client("logs").get_log_events(logGroupName=f"/codebuild/{NAME}", logStreamName=b["logs"]["streamName"],
+                                               limit=60, startFromHead=False)["events"]
+            say("\n".join(e["message"].rstrip() for e in ev[-40:]))
+        except bx.ClientError:
+            pass
+        sys.exit(1)
+
+
+def task_definition(res: dict, tag: str) -> str:
+    ecs = client("ecs")
+    return ecs.register_task_definition(
+        family=NAME, networkMode="awsvpc", requiresCompatibilities=["FARGATE"], cpu="1024", memory="2048",
+        executionRoleArn=res["exec_role"], taskRoleArn=res["task_role"],
+        containerDefinitions=[{
+            "name": "app", "image": f"{res['repo_uri']}:{tag}", "essential": True,
+            "portMappings": [{"containerPort": PORT, "protocol": "tcp"}],
+            "environment": [
+                {"name": "AWS_REGION", "value": REGION},
+                {"name": "LLM_PROVIDER", "value": "bedrock"},
+                {"name": "CORS_ORIGINS", "value": ""},  # the site and API share one address
+                {"name": "AUDIT_TO_STDOUT", "value": "1"},
+            ],
+            "logConfiguration": {"logDriver": "awslogs", "options": {
+                "awslogs-group": f"/ecs/{NAME}", "awslogs-region": REGION, "awslogs-stream-prefix": "app"}},
+        }])["taskDefinition"]["taskDefinitionArn"]
+
+
+def roll_out(res: dict, taskdef: str) -> None:
+    ecs = client("ecs")
+    existing = ecs.describe_services(cluster=NAME, services=[NAME])["services"]
+    if existing and existing[0]["status"] == "ACTIVE":
+        ecs.update_service(cluster=NAME, service=NAME, taskDefinition=taskdef, forceNewDeployment=True)
+        say("Updating the running service")
+    else:
+        ecs.create_service(
+            cluster=NAME, serviceName=NAME, taskDefinition=taskdef, desiredCount=1, launchType="FARGATE",
+            networkConfiguration={"awsvpcConfiguration": {"subnets": res["subnets"], "securityGroups": [res["task_sg"]],
+                                                          "assignPublicIp": "ENABLED"}},
+            loadBalancers=[{"targetGroupArn": res["tg_arn"], "containerName": "app", "containerPort": PORT}],
+            healthCheckGracePeriodSeconds=90,
+            deploymentConfiguration={"minimumHealthyPercent": 100, "maximumPercent": 200,
+                                     "deploymentCircuitBreaker": {"enable": True, "rollback": True}})
+        say("Created the service")
+    say("Waiting for the new version to start (about 2 minutes)")
+    deadline = time.time() + 15 * 60
+    while time.time() < deadline:
+        s = ecs.describe_services(cluster=NAME, services=[NAME])["services"][0]
+        d = next((x for x in s["deployments"] if x["status"] == "PRIMARY"), None)
+        if d and d.get("rolloutState") == "COMPLETED" and len(s["deployments"]) == 1:
+            return
+        if d and d.get("rolloutState") == "FAILED":
+            say(f"Rollout failed: {d.get('rolloutStateReason')}")
+            for e in s["events"][:5]:
+                say("  " + e["message"])
+            sys.exit(1)
+        time.sleep(15)
+    sys.exit("Timed out waiting for the rollout. Check the ECS console.")
+
+
+def wait_healthy(url: str) -> bool:
+    for _ in range(24):
+        try:
+            with urllib.request.urlopen(f"{url}/health", timeout=8) as r:
+                if r.status == 200:
+                    return True
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(5)
+    return False
+
+
+def setup_only() -> None:
     out = ensure_all()
     say("Waiting for CloudFront to finish (a few minutes the first time)")
     wait_deployed(out["cf_id"])
     say(f"HTTPS link: {out['https_url']}")
     say(f"Plain link: http://{out['alb_dns']}")
+
+
+def deploy_main() -> None:
+    t0 = time.time()
+    res = ensure_all()
+    tag = f"{datetime.now():%Y%m%d-%H%M%S}-{git_short()}"
+    build_image(res, tag)
+    roll_out(res, task_definition(res, tag))
+    url = f"http://{res['alb_dns']}"
+    say("Checking the live site")
+    ok = wait_healthy(url)
+    say(f"\n{'Live' if ok else 'Deployed, but /health is not answering yet'}: {res['https_url']}   ({(time.time() - t0) / 60:.1f} min)")
+    say(f"Plain http link: {url}")
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["setup"]:
+        setup_only()
+    else:
+        deploy_main()

@@ -8,8 +8,8 @@ This is a 22-hour hackathon project. A focused, explainable prototype beats broa
 
 - All 7 modules are built and running on real data (`data_mode: "live"`). Mock mode (`data.mock_store`) kicks in only if the data files are missing.
 - `app/models.py` is the API contract. A teammate is building the Flutter app against it right now.
-- `app/engine.py` orchestrates resolver → risk → restoration → rules → messages.
-- Missing from the data package: STORMS labor-hour and indirect-labor Excel files. Restoration uses labeled placeholders in `app/config.py` until they arrive.
+- The app is 5 files: `data.py` (settings, loader, area lookup), `engines.py` (risk, restoration, rules, live weather, orchestration), `assistant.py` (Bedrock, messages, chat), `main.py` (routes + safety layer), `models.py` (contract). `deploy.py` hosts it on AWS.
+- Missing from the data package: STORMS labor-hour and indirect-labor Excel files. Restoration uses labeled placeholders at the top of `app/data.py` until they arrive.
 - Smoke test: `python -m tests.smoke_test`.
 - Frontend is a React + Vite web app in `src/` (not Flutter), wired to the API through `src/api/backend.ts`. Radar and Chat screens are labeled sample data.
 
@@ -67,12 +67,12 @@ When inspecting data, report: columns, dtypes, row counts, null rates, join keys
 ## Modules to build (in this order)
 
 1. **Data loader** (`app/data.py`): load and cache all files at startup. Report schema problems clearly. App must still start if a file is missing; dependent features fall back.
-2. **ID resolver** (`app/resolver.py`): location ID → circuit, upstream device, nearby past damage.
-3. **Risk engine** (`app/risk.py`): band low/medium/high, real confidence, top 3 plain-English reasons. Logistic regression or LightGBM; weighted score if data is sparse.
-4. **Restoration engine** (`app/restoration.py`): labor hours × damage qty × travel mult × nonproductive mult ÷ crews. Monte Carlo over damage counts, travel delays, crew availability → 10th to 90th percentile range. Counterfactual deltas ("+2 crews → X to Y hours"). Recompute on damage, crews, or access changes.
-5. **Rules engine** (`app/rules.py`): prep tips and safety messages by risk band and duration, declared-need modifiers, alert eligibility with the rule named, channel, timing, escalation trigger.
-6. **Message generator** (`app/messages.py`): templates for the 4 message types. Optional LLM polish from structured JSON, then the number validator.
-7. **Safety layer** (`app/safety.py`): strip coords and sensitive fields from every response, input validation, fallback flag, audit log.
+2. **ID resolver** (`app/data.py`): location ID → circuit, upstream device, nearby past damage.
+3. **Risk engine** (`app/engines.py`): band low/medium/high, real confidence, top 3 plain-English reasons. Logistic regression or LightGBM; weighted score if data is sparse.
+4. **Restoration engine** (`app/engines.py`): labor hours × damage qty × travel mult × nonproductive mult ÷ crews. Monte Carlo over damage counts, travel delays, crew availability → 10th to 90th percentile range. Counterfactual deltas ("+2 crews → X to Y hours"). Recompute on damage, crews, or access changes.
+5. **Rules engine** (`app/engines.py`): prep tips and safety messages by risk band and duration, declared-need modifiers, alert eligibility with the rule named, channel, timing, escalation trigger.
+6. **Message generator** (`app/assistant.py`): templates for the 4 message types. Optional LLM polish from structured JSON, then the number validator.
+7. **Safety layer** (`app/main.py`): strip coords and sensitive fields from every response, input validation, fallback flag, audit log.
 
 When a real module replaces a mock, switch `data_mode` from `"mock"` to `"live"` for that path.
 

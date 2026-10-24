@@ -1,25 +1,114 @@
-"""Load organizer data once at startup, build per-circuit features, cache to disk.
+"""Settings, data loading, and area lookup.
 
-The app must still start if any file is missing. Each step records what loaded and
-what failed in `store.report`; engines check `store.has(...)` and fall back.
-
-Privacy: customer coordinates, addresses, premise numbers, and the life-support flag
-are never loaded into the store. Facility names and locations are reduced to a
-per-circuit yes/no flag and then dropped.
+  python -m app.data         print the data schema report
+  python -m app.data zips    rebuild app/zip_centers.csv (needs internet)
 """
 from __future__ import annotations
 
-import collections
-import logging
-import pickle
-import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from pathlib import Path
+import collections
+import csv
+import json
+import logging
+import math
+import os
+import pickle
+import sys
+import time
+import urllib.error
+import urllib.request
 
 import networkx as nx
 import numpy as np
 import pandas as pd
 
-from . import config as C
+
+# ============================================================================
+# SETTINGS
+# Paths and tunable constants. Placeholders are labeled so they show up in meta.assumptions.
+# ============================================================================
+
+ROOT = Path(__file__).resolve().parent.parent
+
+try:  # local runs: pick up AWS credentials and settings from .env. In AWS there is no .env.
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
+except ImportError:
+    pass
+DATA_DIR = ROOT / "data"
+CACHE_DIR = DATA_DIR / "_cache"
+LOG_DIR = ROOT / "logs"
+# In the Docker image only: processed data built from the raw files (about 150 KB).
+BUNDLE = Path(os.getenv("STORE_BUNDLE", ROOT / "bundle" / "store.pkl"))
+ZIP_TABLE = ROOT / "app" / "zip_centers.csv"   # public ZIP -> city + center point
+WEATHER_MODEL = ROOT / "app" / "weather_model.json"  # trained by python -m app.train_weather
+
+FILES = {
+    "arcos": DATA_DIR / "Data1" / "arcos_prod_damage_09_28_Clip.shp",
+    "customers": DATA_DIR / "Data1" / "Customer_Clip.shp",
+    "poles": DATA_DIR / "Data1" / "Pole_Clip.shp",
+    "primary": DATA_DIR / "Data1" / "Primary_ExportFeatures.shp",
+    "fuses": DATA_DIR / "Data1" / "Fuse_Bank_Clip.shp",
+    "reclosers": DATA_DIR / "Data2" / "Recloser_Bank_Clip.shp",
+    "switches": DATA_DIR / "Data2" / "Switch_Clip.shp",
+    "transformers": DATA_DIR / "Data2" / "Transformer_Clip.shp",
+    "hospitals": DATA_DIR / "Data1" / "Hospitals_Medic_Pairwis_Clip.shp",
+    "fire": DATA_DIR / "Data1" / "Fire_Stations_E_Pairwis_Clip.shp",
+    "ambulance": DATA_DIR / "Data1" / "Ambulance_Servi_Pairwis_Clip.shp",
+    "topology": DATA_DIR / "matched_upstream" / "matched_upstream.txt",
+    # Not in the data package yet. Restoration uses labeled placeholders until they arrive.
+    "storms_labor": DATA_DIR / "storms_labor_hours.xlsx",
+    "indirect_labor": DATA_DIR / "indirect_labor.xlsx",
+}
+
+# Projected CRS for distance math (UTM 17N covers the Roanoke service area).
+METRIC_CRS = "EPSG:32617"
+
+# Locations: one per circuit with at least this many customers.
+MIN_CUSTOMERS_PER_LOCATION = 50
+
+# Critical facility "nearby" = within this distance of the circuit's primary lines.
+CRITICAL_FACILITY_RADIUS_M = 800
+
+# A ZIP counts as served when at least this many customers sit closest to its center.
+MIN_CUSTOMERS_PER_ZIP = 100
+
+# Monte Carlo (fixed so the demo is repeatable)
+MC_SAMPLES = 2000
+MC_SEED = 42
+
+# Placeholder crew-hours per damage item, used until the STORMS labor-hour file is provided.
+PLACEHOLDER_LABOR_HOURS = {
+    "pole": 6.0,
+    "primary_wire": 2.5,
+    "secondary_wire": 1.5,
+    "transformer": 3.0,
+    "fuse_switch": 1.0,
+    "recloser": 3.0,
+    "other_equipment": 2.0,
+}
+PLACEHOLDER_TRAVEL_MULT = 1.25
+PLACEHOLDER_NONPRODUCTIVE_MULT = 1.15
+BLOCKED_ROADS_TRAVEL_MULT = 1.5
+CREW_AVAILABILITY = 0.85  # chance each assigned crew is actually working at a given time
+
+# Storm severity scale. The largest storm in ARCOS history (Feb 2025) is treated as severity 4.
+REFERENCE_SEVERITY = 4
+SEVERITY_LOGIT_STEP = 1.6  # risk log-odds change per severity level (assumed, not fitted)
+SEVERITY_DAMAGE_MULT = {1: 0.05, 2: 0.2, 3: 0.5, 4: 1.0, 5: 1.8}
+
+RISK_BANDS = [(0.35, "low"), (0.65, "medium"), (1.01, "high")]
+
+# Backup battery life we assume for home medical equipment when deciding escalation.
+MEDICAL_BACKUP_HOURS = 8
+
+# ============================================================================
+# DATA LOADER
+# Load organizer data once at startup, build per-circuit features, cache to disk.
+# ============================================================================
 
 log = logging.getLogger("data")
 
@@ -36,7 +125,7 @@ ARCOS_CLASS = {
     "switch": "fuse_switch",
     "recloser bank": "recloser",
 }
-DAMAGE_CLASSES = list(C.PLACEHOLDER_LABOR_HOURS.keys())
+DAMAGE_CLASSES = list(PLACEHOLDER_LABOR_HOURS.keys())
 NON_WOOD = {"fiberglass", "steel", "concrete", "aluminum", "composite", "unknown", "other"}
 
 REQUIRED_COLUMNS = {
@@ -86,7 +175,7 @@ def _read(store: Store, name: str, columns=None, geometry=False):
     """Read one shapefile, check required columns, record the outcome. Returns None on failure."""
     import pyogrio
 
-    path = C.FILES[name]
+    path = FILES[name]
     if not path.exists():
         store.report[name] = {"status": "missing", "rows": 0, "detail": f"{path.name} not found"}
         log.warning("data: %s missing (%s)", name, path)
@@ -195,7 +284,7 @@ def _build(store: Store) -> None:
             "backbone_share": g.usage.agg(lambda s: (s == "Backbone").mean()),
         })
         feats = feats.join(pf, how="outer") if len(feats) else pf
-        prim_m = prim[["key", "geometry"]].to_crs(C.METRIC_CRS)
+        prim_m = prim[["key", "geometry"]].to_crs(METRIC_CRS)
         del prim
 
     # --- poles: match each pole to the nearest primary line to get its circuit ---
@@ -203,7 +292,7 @@ def _build(store: Store) -> None:
     if poles is not None and prim_m is not None:
         import geopandas as gpd
 
-        poles = poles[poles.owner_type == "Company Owned"].to_crs(C.METRIC_CRS)
+        poles = poles[poles.owner_type == "Company Owned"].to_crs(METRIC_CRS)
         j = gpd.sjoin_nearest(poles, prim_m, how="inner", max_distance=30)
         j = j[~j.index.duplicated()]
         age = (pd.Timestamp("2026-01-01") - j.date_insta).dt.days / 365.25
@@ -227,10 +316,10 @@ def _build(store: Store) -> None:
         for name in ("hospitals", "fire", "ambulance"):
             f = _read(store, name, columns=[], geometry=True)
             if f is not None:
-                fac.append(f[["geometry"]].to_crs(C.METRIC_CRS))
+                fac.append(f[["geometry"]].to_crs(METRIC_CRS))
         if fac:
-            fac = gpd.GeoDataFrame(pd.concat(fac, ignore_index=True), crs=C.METRIC_CRS)
-            fac["geometry"] = fac.geometry.buffer(C.CRITICAL_FACILITY_RADIUS_M)
+            fac = gpd.GeoDataFrame(pd.concat(fac, ignore_index=True), crs=METRIC_CRS)
+            fac["geometry"] = fac.geometry.buffer(CRITICAL_FACILITY_RADIUS_M)
             hit = gpd.sjoin(prim_m, fac, how="inner", predicate="intersects")
             near_keys = set(hit["key"])
             feats["critical_facility_nearby"] = feats.index.isin(near_keys)
@@ -238,7 +327,7 @@ def _build(store: Store) -> None:
     del prim_m
 
     # --- topology: premise -> upstream devices. Zone device = nearest recloser, else breaker. ---
-    if C.FILES["topology"].exists() and premise_to_key:
+    if FILES["topology"].exists() and premise_to_key:
         try:
             graph = nx.DiGraph()
             behind = collections.Counter()   # customers behind each device (any level)
@@ -247,7 +336,7 @@ def _build(store: Store) -> None:
             depth_sum = collections.Counter()
             depth_n = collections.Counter()
             rows = 0
-            with open(C.FILES["topology"], encoding="utf-8", errors="replace") as fh:
+            with open(FILES["topology"], encoding="utf-8", errors="replace") as fh:
                 for line in fh:
                     parts = line.rstrip("\n").split("\t")
                     key = premise_to_key.get(parts[0])
@@ -335,7 +424,7 @@ def _build(store: Store) -> None:
 
     # --- selectable anonymized locations ---
     if "n_customers" in feats:
-        loc = feats[feats.n_customers >= C.MIN_CUSTOMERS_PER_LOCATION].copy().sort_index()
+        loc = feats[feats.n_customers >= MIN_CUSTOMERS_PER_LOCATION].copy().sort_index()
         loc["area_no"] = loc.groupby("city").cumcount() + 1
         loc = loc.reset_index(names="key")
         loc["location_id"] = [f"LOC-{i + 1:03d}" for i in range(len(loc))]
@@ -347,9 +436,9 @@ def _build(store: Store) -> None:
 
 
 def _load_zip_table() -> pd.DataFrame | None:
-    if not C.ZIP_TABLE.exists():
+    if not ZIP_TABLE.exists():
         return None
-    z = pd.read_csv(C.ZIP_TABLE, dtype={"zip": str})
+    z = pd.read_csv(ZIP_TABLE, dtype={"zip": str})
     return z[z.state == "VA"].reset_index(drop=True)
 
 
@@ -360,7 +449,7 @@ def _zip_counts(store: Store, cust: pd.DataFrame) -> pd.DataFrame | None:
     real ZIP borders are not in the data, so this is nearest-center, not exact."""
     z = _load_zip_table()
     if z is None:
-        store.report["zip_table"] = {"status": "missing", "rows": 0, "detail": f"{C.ZIP_TABLE.name} not found"}
+        store.report["zip_table"] = {"status": "missing", "rows": 0, "detail": f"{ZIP_TABLE.name} not found"}
         return None
     from scipy.spatial import cKDTree
 
@@ -390,7 +479,7 @@ def _zip_index(counts: pd.DataFrame | None, valid_keys: set):
     top = (counts.sort_values("n", ascending=False).groupby("c").head(5)
            .assign(w=lambda t: t.n / t.groupby("c").n.transform("sum")))
     centers = counts.drop_duplicates("c").set_index("c")[["lat", "lon"]].join(customers)
-    centers = centers[centers.customers >= C.MIN_CUSTOMERS_PER_ZIP].reset_index()
+    centers = centers[centers.customers >= MIN_CUSTOMERS_PER_ZIP].reset_index()
     index = z.merge(centers, on=["lat", "lon"], how="inner")
     index["lat"], index["lon"] = index.lat.round(2), index.lon.round(2)
     weights = z.merge(top[["c", "key", "w", "lat", "lon"]], on=["lat", "lon"], how="inner")[["zip", "key", "w"]]
@@ -462,21 +551,21 @@ def _chain_steps(chain: tuple, behind: collections.Counter) -> list[dict]:
 
 def _signature() -> dict:
     sig = {"v": CACHE_VERSION}
-    for k, p in C.FILES.items():
+    for k, p in FILES.items():
         sig[k] = p.stat().st_mtime if p.exists() else None
     return sig
 
 
 def load() -> Store:
     t0 = time.time()
-    if C.BUNDLE.exists():  # Docker image: raw files are not shipped, only the processed store
-        with open(C.BUNDLE, "rb") as fh:
+    if BUNDLE.exists():  # Docker image: raw files are not shipped, only the processed store
+        with open(BUNDLE, "rb") as fh:
             _, store = pickle.load(fh)
         store.from_cache = True
         store.load_seconds = round(time.time() - t0, 2)
         log.info("data: loaded bundled store in %.2fs", store.load_seconds)
         return store
-    cache = C.CACHE_DIR / "store.pkl"
+    cache = CACHE_DIR / "store.pkl"
     sig = _signature()
     if cache.exists():
         try:
@@ -500,7 +589,7 @@ def load() -> Store:
     store.load_seconds = round(time.time() - t0, 2)
     if store.live:
         try:
-            C.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
             with open(cache, "wb") as fh:
                 pickle.dump((sig, store), fh)
         except Exception:  # noqa: BLE001
@@ -524,11 +613,107 @@ def schema_report(store: Store) -> str:
         lines.append(f"reference event: {store.reference_event}")
     return "\n".join(lines)
 
+# ============================================================================
+# AREA LOOKUP (location id -> circuit features)
+# Location ID -> area features. Two kinds of ID:
+# ============================================================================
 
-if __name__ == "__main__":
+@dataclass
+class Resolved:
+    location_id: str
+    label: str
+    features: dict
+    customers_served_band: str
+    is_zip: bool = False
+    zip: str | None = None
+    lat: float | None = None   # server-side only: used to ask the weather service, never returned
+    lon: float | None = None
+
+
+def _clean(d: dict) -> dict:
+    return {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in d.items()}
+
+
+def resolve(store: Store, location_id: str) -> Resolved | None:
+    if location_id.startswith("ZIP-"):
+        return _resolve_zip(store, location_id[4:])
+    locs = store.locations
+    if locs is None:
+        return None
+    row = locs[locs.location_id == location_id]
+    if row.empty:
+        return None
+    r = row.iloc[0]
+    return Resolved(location_id, r.label, _clean(store.circuits.loc[r.key].to_dict()), r.customers_served_band)
+
+
+def _resolve_zip(store: Store, zip_code: str) -> Resolved | None:
+    if store.zip_index is None or store.zip_weights is None:
+        return None
+    z = store.zip_index[store.zip_index.zip == zip_code]
+    w = store.zip_weights[store.zip_weights.zip == zip_code]
+    if z.empty or w.empty:
+        return None
+    z = z.iloc[0]
+    rows = store.circuits.loc[w.key.values]
+    weights = w.w.values / w.w.sum()
+    num = rows.select_dtypes("number")
+    blend = {c: float(np.average(num[c].fillna(num[c].median()), weights=weights)) for c in num.columns}
+    for c in ("hist_records", "hist_events", "open_damage", "pre_records", "ref_records"):
+        if c in blend:
+            blend[c] = round(blend[c])
+    top = rows.iloc[int(np.argmax(weights))]            # the biggest circuit supplies the non-numeric parts
+    blend["upstream_device_type"] = top.get("upstream_device_type")
+    blend["upstream_chain"] = top.get("upstream_chain")
+    blend["critical_facility_nearby"] = bool(rows.critical_facility_nearby.any())
+    return Resolved(f"ZIP-{zip_code}", f"ZIP {zip_code} · {z.city}", _clean(blend),
+                    _customers_band(float(z.customers)), True, zip_code, float(z.lat), float(z.lon))
+
+
+def upstream_band(n) -> str | None:
+    return None if n is None else _customers_band(n)
+
+# ============================================================================
+# ZIP TABLE BUILDER
+# Build app/zip_centers.csv: public ZIP code -> city and center point.
+# ============================================================================
+
+ZIP_RANGE = range(24000, 24700)  # southwest Virginia, covers the Roanoke service area
+
+
+def _fetch_zip(zip_code: int):
+    z = f"{zip_code:05d}"
+    try:
+        with urllib.request.urlopen(f"https://api.zippopotam.us/us/{z}", timeout=15) as r:
+            p = json.load(r)["places"][0]
+        return z, p["place name"], p["state abbreviation"], round(float(p["latitude"]), 3), round(float(p["longitude"]), 3)
+    except (urllib.error.HTTPError, urllib.error.URLError, KeyError, TimeoutError):
+        return None
+
+
+def _schema_cli() -> None:
     logging.basicConfig(level=logging.INFO)
     s = load()
     print(schema_report(s))
     pd.set_option("display.width", 250)
     pd.set_option("display.max_columns", 40)
     print(s.circuits.describe().T)
+
+
+def build_zip_table() -> None:
+    """Build app/zip_centers.csv: public ZIP code -> city and center point (needs internet; run once, then commit)."""
+    with ThreadPoolExecutor(8) as pool:
+        rows = [r for r in pool.map(_fetch_zip, ZIP_RANGE) if r and r[2] == "VA"]
+    ZIP_TABLE.parent.mkdir(exist_ok=True)
+    with open(ZIP_TABLE, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["zip", "city", "state", "lat", "lon"])
+        w.writerows(sorted(rows))
+    print(f"wrote {len(rows)} ZIP codes to {ZIP_TABLE}")
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["zips"]:
+        build_zip_table()
+    else:
+        _schema_cli()

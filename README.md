@@ -87,7 +87,7 @@ Errors: unknown `location_id` → `404`. Invalid input (for example `storm_sever
 
 - `GET /zip/24014` → `{zip, location_id: "ZIP-24014", label, city, customers_served_band}`. 404 if we have no data for the ZIP, 422 if it isn't 5 digits.
 - Use `location_id` (`ZIP-24014`) anywhere `LOC-001` worked: `/assess`, `/message`. A ZIP is served by several circuits, so the engine uses a customer-weighted "typical circuit" for it, and `meta.limits` says so.
-- ZIP centers are an offline CSV (`app/zip_centers.csv`, built once by `python -m scripts.build_zip_table`), so a typed ZIP is never sent to a third party. Customers are matched to the nearest ZIP center, so ZIP borders are approximate.
+- ZIP centers are an offline CSV (`app/zip_centers.csv`, built once by `python -m app.data zips`), so a typed ZIP is never sent to a third party. Customers are matched to the nearest ZIP center, so ZIP borders are approximate.
 - `GET /weather/24014` → `severity` (1-5), `severity_label`, `chance_pct`, `reasons`, `hourly` (next 12 hours: rain, gusts, wind direction), `alerts` (National Weather Service; `null` = could not check), `fallback`. Only the ZIP's public center point goes to Open-Meteo and NWS. Cached 10 minutes.
 - The app uses `severity` as the default `storm_severity` ("live mode"). The "Try a storm" panel overrides it ("simulate mode"), which keeps demos repeatable on a sunny day.
 
@@ -104,7 +104,7 @@ Errors: unknown `location_id` → `404`. Invalid input (for example `storm_sever
 | Not used | Repair dates, repair status, or any after-the-fact field |
 | Caveats | Only 55 positive days and one dominant storm. Reports lag the weather by about a day. We tried a few feature sets on the same folds, so the score is slightly optimistic. Tree models did worse with this little data |
 
-Retrain with `python -m app.train_weather` (needs internet). It writes `app/weather_model.json`.
+Retrain with `python -m app.engines train-weather` (needs internet). It writes `app/weather_model.json`.
 
 ### Privacy notes
 
@@ -262,16 +262,14 @@ Ranges over 48 hours are written in days ("about 4 to 17 days"). When `meta.fall
 
 ## How it works
 
-| Module | What it does |
+| File | What's in it |
 |---|---|
-| `app/data.py` | Loads all shapefiles + topology at startup, checks required columns, builds one feature row per circuit, caches to disk. Missing files → that feature falls back, app still starts. |
-| `app/resolver.py` | Location ID → circuit features, upstream device, damage history |
-| `app/risk.py` | Logistic regression: miles of overhead line, customers served, past damage. Trained on history *before* the Feb 2025 storm, 5-fold CV backtest on that storm (AUC 0.82, Brier 0.17). Severity shifts the log-odds; assumed damaged poles push risk toward certain. |
-| `app/restoration.py` | Monte Carlo, 2000 draws, fixed seed: damage counts (Poisson), labor-hour noise, travel delay, blocked roads, crew availability, repair-queue position, 16-hour shifts → p10–p90. Counterfactuals reuse the same random draws so only the changed input moves the range. ~5 ms. |
-| `app/rules.py` | Prep tips by risk band and duration, declared-need modifiers, alert rules R0–R3, channel, timing, escalation |
-| `app/messages.py` | Templates for 4 message types, optional LLM polish, number validator |
-| `app/safety.py` | Strips coordinates, internal codes, and sensitive keys from every response; JSON-lines audit log in `logs/audit.log` (declared needs logged as a count only) |
-| `app/engine.py` | Ties it together: confidence, fallback, confirmed facts, assumptions, limits |
+| `app/data.py` | **Settings** (paths, Monte Carlo size, labeled placeholders), the **data loader** (reads all shapefiles and the topology file at startup, checks columns, builds one feature row per circuit, caches to disk), and the **area lookup** (`LOC-012` or `ZIP-24014` to a circuit or a blended "typical circuit"). `python -m app.data` prints the schema report; `python -m app.data zips` rebuilds the ZIP table |
+| `app/engines.py` | The **risk model** (logistic regression on line miles, customers, past damage; backtested on the Feb 2025 storm), the **restoration simulation** (2000-draw Monte Carlo with a fixed seed, plus what-ifs and a histogram), the **rules** (tips, alert rules R0-R3, channel, timing, escalation), the **live weather model** and its training, and the **request orchestration** (confidence, fallback, confirmed facts, assumptions, limits). `python -m app.engines train-weather` retrains the weather model |
+| `app/assistant.py` | The **Bedrock helper**, **customer message** templates with the **number validator**, and the **chat** answers (facts-only prompt, template fallback) |
+| `app/main.py` | The **routes**, the **safety layer** (strips coordinates, internal codes, and sensitive keys from every response; audit log with ZIPs shortened to 3 digits), rate limit, and serving the website |
+| `app/models.py` | The API contract (pydantic). The source of truth for the JSON shape |
+| `deploy.py` | Builds the Docker image in AWS and rolls it out (see Hosting on AWS) |
 
 ### Data notes
 
@@ -280,7 +278,7 @@ Ranges over 48 hours are written in days ("about 4 to 17 days"). When `meta.fall
 - Poles have no circuit field; each company-owned pole is matched to the nearest primary line within 30 m.
 - ARCOS dates are day-level only. Storm events are grouped by gaps of more than 3 days. The largest is Feb 12–18, 2025 (1,254 records).
 - Not loaded on purpose: customer coordinates, addresses, premise numbers, and the customer life-support flag (declared needs are opt-in only). Facility names and locations are reduced to a yes/no flag per area.
-- **Missing from the package:** STORMS labor-hour and indirect-labor Excel files. Restoration uses placeholders from `app/config.py`, listed in every response's `meta.assumptions`.
+- **Missing from the package:** STORMS labor-hour and indirect-labor Excel files. Restoration uses placeholders from the settings at the top of `app/data.py`, listed in every response's `meta.assumptions`.
 
 ## Frontend notes
 
@@ -303,23 +301,17 @@ React app in `src/`, wired to this API:
 
 ```
 app/
-  main.py         routes, CORS
+  main.py         routes, safety layer (scrubbing, audit log), serves the website
   models.py       pydantic contract (source of truth for the JSON shape)
-  config.py       paths, Monte Carlo settings, labeled placeholders
-  data.py         loader, schema checks, feature build, cache, mock store
-  resolver.py     location -> circuit features
-  risk.py         risk model + backtest
-  restoration.py  Monte Carlo range + counterfactuals
-  rules.py        actions, alerts, channel, escalation
-  messages.py     templates, LLM polish hook, number validator
-  safety.py       response scrubbing, audit log
-  engine.py       request orchestration
+  data.py         settings, data loader, schema checks, area lookup, ZIP table builder
+  engines.py      risk, restoration, rules, live weather + training, request orchestration
+  assistant.py    Bedrock helper, messages + number validator, chat
+  zip_centers.csv, weather_model.json   small files the app ships with
+deploy.py         AWS hosting: build the image, roll it out
 tests/
   smoke_test.py   mild vs severe on every endpoint, plus the newer optional fields
-app/weather.py, train_weather.py, zip_centers.csv, weather_model.json   live weather model
-scripts/          one-off builders (ZIP table)
 src/              React + Vite frontend
-  api/            backend client, contract types, sample data
+  api/            backend client, contract types
   assessment.tsx  shared scenario + /assess state (with offline copy)
   location.tsx    chosen area
   screens/        Home, Alerts (timeline), Storm (Prepare), Radar, Chat
@@ -331,7 +323,7 @@ One Docker image serves the website and the API. AWS builds it (this PC needs no
 ECR, and runs it on ECS Fargate behind a load balancer. The load balancer's default address is the link.
 
 ```bash
-python -m deploy.deploy     # run after any change: builds, pushes, and rolls out the new version
+python deploy.py     # run after any change: builds, pushes, and rolls out the new version
 ```
 
 What it does, in order: makes sure the AWS resources exist (safe to repeat) -> zips the source -> CodeBuild builds
@@ -369,7 +361,7 @@ then were refused), so Nova is the default.
 Done: ZIP search, weather-driven storm strength, calmer UI, interactive forecast radar with help actions, NWS alerts, About you, Bedrock chat, AWS hosting.
 
 Next:
-1. Load the STORMS and indirect-labor files when available (replace placeholders in `app/config.py`).
+1. Load the STORMS and indirect-labor files when available (replace placeholders at the top of `app/data.py`).
 
 ## Built during HackOHI/O 2026
 
