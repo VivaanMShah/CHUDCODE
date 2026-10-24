@@ -182,6 +182,10 @@ export interface WeatherResponse {
   fallback: boolean;
   fallback_reason: string | null;
   model: { auc_out_of_time: number; damage_days: number; days: number } | null;
+  storm_type?: string | null; // hurricane, tornado, thunderstorm, winter, flood, wind, rain, none
+  storm_type_label?: string | null;
+  arrival_hours?: number | null; // hours until storm conditions start
+  arrival_text?: string | null;
 }
 
 // ---- Chat ----------------------------------------------------------------------

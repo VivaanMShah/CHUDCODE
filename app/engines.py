@@ -654,6 +654,62 @@ def _next_hours(forecast: dict, hours: int = 12) -> list[dict]:
     return out
 
 
+# Storm types, worst first. The first word list that matches a National Weather Service alert name wins.
+STORM_TYPES = [
+    ("hurricane", "Hurricane or tropical storm", ("hurricane", "tropical", "storm surge")),
+    ("tornado", "Tornado", ("tornado",)),
+    ("thunderstorm", "Thunderstorm", ("thunderstorm",)),
+    ("winter", "Winter storm (snow or ice)", ("winter", "ice storm", "blizzard", "snow", "freez", "sleet")),
+    ("flood", "Flooding rain", ("flood",)),
+    ("wind", "High wind", ("wind",)),
+]
+STORM_LABELS = {key: label for key, label, _ in STORM_TYPES}
+STORM_LABELS.update({"rain": "Heavy rain", "none": "No storm expected"})
+
+# An hour counts as "storm conditions" at these levels. The storm "arrives" at the first such hour.
+ARRIVAL_GUST_MPH, ARRIVAL_RAIN_IN = 35, 0.2
+
+
+def classify_storm(alerts: list[dict] | None, hours: list[dict]) -> str:
+    """What kind of storm is it? Official alert names first, then the forecast itself."""
+    for key, _, words in STORM_TYPES:
+        for alert in alerts or []:
+            if any(word in alert["event"].lower() for word in words):
+                return key
+    # No alert: read the hours coming up.
+    worst_gust = max((h["gust_mph"] for h in hours), default=0)
+    worst_rain = max((h["precip_in"] for h in hours), default=0)
+    coldest = min((h["temp_f"] for h in hours if h["precip_in"] >= 0.05), default=99)
+    if coldest <= 34:
+        return "winter"
+    if worst_gust >= 58:
+        return "wind"
+    if worst_gust >= ARRIVAL_GUST_MPH and worst_rain >= 0.1:
+        return "thunderstorm"
+    if worst_rain >= 0.3:
+        return "rain"
+    if worst_gust >= 40:
+        return "wind"
+    return "none"
+
+
+def hours_until_storm(hours: list[dict]) -> int | None:
+    """Hours from now until conditions first reach storm level. None if they do not in the next 48 hours."""
+    for hour in hours:
+        if hour["gust_mph"] >= ARRIVAL_GUST_MPH or hour["precip_in"] >= ARRIVAL_RAIN_IN:
+            return hour["hours_ahead"]
+    return None
+
+
+def arrival_text(storm_type: str, hours: int | None) -> str:
+    if storm_type == "none" or hours is None:
+        return "No storm is expected in the next 48 hours."
+    kind = STORM_LABELS[storm_type].lower()
+    if hours <= 0:
+        return f"Storm conditions ({kind}) are here now."
+    return f"Storm conditions ({kind}) are expected in about {hours} hour{'s' if hours != 1 else ''}."
+
+
 def live_weather(model: dict | None, lat: float, lon: float) -> dict:
     """Storm strength for today and tomorrow, why, the next 12 hours, and NWS alerts.
 
@@ -661,7 +717,8 @@ def live_weather(model: dict | None, lat: float, lon: float) -> dict:
     app falls back to letting the customer pick a strength by hand."""
     answer = {"updated_at": datetime.now(TZ).isoformat(timespec="seconds"), "alerts": None, "hourly": [],
               "severity": None, "severity_label": None, "chance_pct": None, "peak_day": None, "reasons": [],
-              "fallback": True, "fallback_reason": None, "model": None}
+              "fallback": True, "fallback_reason": None, "model": None,
+              "storm_type": None, "storm_type_label": None, "arrival_hours": None, "arrival_text": None}
     if model is None:
         answer["fallback_reason"] = "The weather model has not been trained yet."
         return answer
@@ -682,11 +739,17 @@ def live_weather(model: dict | None, lat: float, lon: float) -> dict:
         day_facts = {"gust": daily.iloc[worst].gust, "precip3": features.iloc[worst]["precip3"]}
 
         metrics = model["metrics"]
+        next_48 = _next_hours(forecast, 48)
+        alerts = fetch_alerts(lat, lon)
+        storm_type = classify_storm(alerts, next_48)
+        arrival = hours_until_storm(next_48) if storm_type != "none" else None
         answer.update({
+            "storm_type": storm_type, "storm_type_label": STORM_LABELS[storm_type],
+            "arrival_hours": arrival, "arrival_text": arrival_text(storm_type, arrival),
             "severity": strength, "severity_label": SEVERITY_LABELS[strength], "chance_pct": round(chance * 100),
             "peak_day": "today" if worst == upcoming[0] else "tomorrow",
-            "reasons": explain(model, features.iloc[worst], day_facts), "hourly": _next_hours(forecast),
-            "alerts": fetch_alerts(lat, lon), "fallback": False,
+            "reasons": explain(model, features.iloc[worst], day_facts), "hourly": next_48[:13],
+            "alerts": alerts, "fallback": False,
             "model": {"auc_out_of_time": metrics["auc"], "damage_days": metrics["damage_days"], "days": metrics["days"]},
         })
         return answer

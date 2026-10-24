@@ -6,6 +6,7 @@ import PhoneAlerts from "../components/PhoneAlerts";
 import SmsDemo from "../components/SmsDemo";
 import { useLocation } from "../location";
 import { useProfile } from "../profile";
+import { StormArrival } from "../components/StormArrival";
 import type { AlertSeverity, WeatherAlert } from "../types";
 import "./Alerts.css";
 
@@ -175,6 +176,7 @@ export default function Alerts() {
       </header>
 
       <div className="stack">
+        <StormArrival live={live} />
         <PhoneAlerts />
 
         {/* Real weather alerts from the National Weather Service */}

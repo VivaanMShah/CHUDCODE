@@ -25,7 +25,7 @@ const MIRRORS = [
 ];
 const CACHE_PREFIX = "storm-watch:places:";
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000;
-const RADIUS_M = 48280; // 30 miles
+const RADIUS_M = 24140; // 15 miles
 
 export function milesBetween(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const r = 3958.8;
@@ -88,17 +88,15 @@ export async function loadPlaces(zip: string, lat: number, lon: number, signal?:
   }
   // Exact-match tags and a 30-mile radius keep this light for the free public servers.
   const q = (tag: string) => `nwr["amenity"="${tag}"](around:${RADIUS_M},${lat},${lon});`;
-  const query = `[out:json][timeout:20];(${q("hospital")}${q("fire_station")}${q("police")});out center tags 200;`;
-  // Ask the servers one after another, 4 seconds apart. The first good answer wins and cancels the rest.
+  const query = `[out:json][timeout:10];(${q("hospital")}${q("fire_station")}${q("police")});out center tags 60;`;
+  // Ask all the servers at the same time. The first good answer wins and cancels the rest.
   const all = new AbortController();
   signal?.addEventListener("abort", () => all.abort(), { once: true });
-  const overall = setTimeout(() => all.abort(), 40000);
+  const overall = setTimeout(() => all.abort(), 15000);
   try {
     const els = await Promise.any(
-      MIRRORS.map(async (mirror, i) => {
-        await new Promise((r) => setTimeout(r, i * 4000));
-        if (all.signal.aborted) throw new Error("cancelled");
-        const res = await fetch(`${mirror}?data=${encodeURIComponent(query)}`, { signal: all.signal });
+      MIRRORS.map(async (mirror) => {
+                const res = await fetch(`${mirror}?data=${encodeURIComponent(query)}`, { signal: all.signal });
         if (!res.ok) throw new Error(`places ${res.status}`);
         return ((await res.json()) as { elements: OverpassElement[] }).elements;
       }),

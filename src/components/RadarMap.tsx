@@ -102,6 +102,7 @@ const RadarMap = forwardRef<RadarMapHandle, Props>(function RadarMap(props, ref)
     }
     L.circleMarker([lat, lon], { radius: 6, color: "#ffffff", weight: 2, fillColor: "#7aa7e8", fillOpacity: 1 })
       .bindTooltip("Your ZIP area").addTo(m);
+    L.control.scale({ imperial: true, metric: false, position: "bottomleft" }).addTo(m);
     pinLayer.current = L.layerGroup().addTo(m);
     tapLayer.current = L.layerGroup().addTo(m);
     m.on("click", (e: L.LeafletMouseEvent) => {

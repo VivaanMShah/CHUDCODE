@@ -156,21 +156,6 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
               </p>
               <RangeBar range={range} bins={est.restoration_histogram ?? []} />
 
-              {est.factor_deltas.length > 0 && (
-                <div className="chips chips--scroll" aria-label="What could change this. Tap to try.">
-                  {est.factor_deltas.map((d) => (
-                    <button key={d.change} type="button" className="chip chip--delta"
-                      disabled={!d.scenario_patch}
-                      onClick={() => d.scenario_patch && updateScenario(d.scenario_patch)}
-                      aria-label={`Try ${d.change}: ${formatRange(d.new_range.low_hours, d.new_range.high_hours)}, ${d.delta_text}`}>
-                      {d.change}
-                      <small className={d.delta_text.includes("faster") ? "is-faster" : d.delta_text.includes("slower") ? "is-slower" : ""}>
-                        {d.delta_text.replace("about ", "")}
-                      </small>
-                    </button>
-                  ))}
-                </div>
-              )}
               {loading && <span className="hero__updating">Updating…</span>}
             </section>
 

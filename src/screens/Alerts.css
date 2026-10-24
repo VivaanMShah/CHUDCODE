@@ -516,3 +516,8 @@
   line-height: 1.5;
   color: var(--text-dim);
 }
+
+.arrival__row { display: flex; align-items: center; gap: 14px; margin: 8px 0; }
+.arrival__icon { font-size: 36px; line-height: 1; }
+.arrival__type { display: block; font-size: 18px; }
+.arrival__when { font-size: 22px; font-weight: 600; }

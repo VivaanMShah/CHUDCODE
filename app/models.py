@@ -252,6 +252,10 @@ class WeatherResponse(BaseModel):
     fallback: bool
     fallback_reason: Optional[str] = None
     model: Optional[WeatherModelInfo] = None
+    storm_type: Optional[str] = None  # hurricane, tornado, thunderstorm, winter, flood, wind, rain, none
+    storm_type_label: Optional[str] = None
+    arrival_hours: Optional[int] = None  # hours until storm conditions start (null = none in the next 48 hours)
+    arrival_text: Optional[str] = None
 
 
 class PushKeys(BaseModel):

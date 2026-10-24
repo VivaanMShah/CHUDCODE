@@ -381,6 +381,9 @@ def _sub_of(item: dict) -> dict:
     return json.loads(item["subscription"])
 
 
+ARRIVAL_PUSH_HOURS = 5   # send the "storm is coming" notification this many hours ahead
+
+
 def check_alerts(state) -> int:
     """Look at the weather for every subscribed ZIP and push once per change. Returns pushes sent."""
     sent, by_zip = 0, defaultdict(list)
@@ -395,6 +398,23 @@ def check_alerts(state) -> int:
             continue
         events = sorted(a["event"] for a in (wx["alerts"] or []))
         sev = wx["severity"]
+
+        # "Heads up": the storm is about to arrive. Sent once per storm type per day, from 5 hours before.
+        soon = wx["arrival_hours"]
+        if soon is not None and soon <= ARRIVAL_PUSH_HOURS and wx["storm_type"] != "none":
+            arrival_key = f"{time.strftime('%Y-%m-%d')}|{wx['storm_type']}"
+            heads_up = f"{wx['storm_type_label']} arriving in about {soon} hour{'s' if soon != 1 else ''}." if soon > 0                 else f"{wx['storm_type_label']} is arriving now."
+            for item in items:
+                if item.get("arrival_key") == arrival_key:
+                    continue
+                result = push(_sub_of(item), {"title": f"Storm arriving: ZIP {zip_code}",
+                                              "body": heads_up + " Charge your phone and open the app for tips.", "url": "/"})
+                if result == "gone":
+                    ALERTS.delete(item["id"])
+                elif result == "ok":
+                    item["arrival_key"] = arrival_key
+                    ALERTS.put(item)
+                    sent += 1
         if sev < 3 and not events:
             continue
         key = f"{time.strftime('%Y-%m-%d')}|{sev if sev >= 3 else 0}|{','.join(events)}"
