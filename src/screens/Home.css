@@ -566,3 +566,9 @@
   line-height: 1.5;
   color: var(--text-dim);
 }
+
+.hero__risk {
+  display: block;
+  width: max-content;
+  margin-top: 6px;
+}

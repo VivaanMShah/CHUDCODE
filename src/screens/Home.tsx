@@ -180,7 +180,7 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
                 <strong>All clear</strong>
                 <p>No storm is expected, so there is nothing you need to do right now. We'll tell you if that changes.</p>
                 <div className="row-links">
-                  <button type="button" className="link" onClick={onOpenAlerts}>Text alerts</button>
+                  <button type="button" className="link" onClick={onOpenAlerts}>Phone alerts</button>
                   <button type="button" className="link" onClick={openSheet}>About you</button>
                 </div>
               </section>

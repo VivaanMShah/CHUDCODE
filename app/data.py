@@ -20,7 +20,6 @@ import time
 import urllib.error
 import urllib.request
 
-import networkx as nx
 import numpy as np
 import pandas as pd
 
@@ -93,7 +92,7 @@ MEDICAL_BACKUP_HOURS = 8
 
 log = logging.getLogger("data")
 
-CACHE_VERSION = 6
+CACHE_VERSION = 7
 
 # ARCOS asset type -> damage class used by the restoration engine.
 ARCOS_CLASS = {
@@ -207,213 +206,316 @@ def _customers_band(n: float) -> str:
 
 
 # ---------------------------------------------------------------- build steps
+#
+# _build() turns the raw files into one table with one row per circuit ("features"). It does this in
+# small steps, and each step is its own function below so you can read them one at a time:
+#
+#   1. _circuit_lookup      work out which circuit each transformer / device belongs to
+#   2. _customer_features   count customers per circuit (customer coordinates are used once, then dropped)
+#   3. _line_features       miles of power line per circuit
+#   4. _pole_features       pole age and material per circuit (optional, not used by the models today)
+#   5. _critical_facility_flags   yes/no: is a hospital / fire / ambulance station near the circuit's lines
+#   6. _topology_features   which device sits upstream of each circuit, and how many customers it serves
+#   7. _damage_history      past storm damage per circuit, from the ARCOS records
+#   8. _make_locations      the anonymous list of areas people can pick (LOC-001, LOC-002, ...)
+#
+# A "circuit key" looks like "STATION12|CIR34". It is an internal id and is never sent to the app.
 
 def _build(store: Store) -> None:
-    # --- circuit key lookup from device tables (transformer location -> circuit key) ---
-    xf = _read(store, "transformers")
-    dev_frames = []
-    xf_to_key = {}
-    if xf is not None:
-        xf["key"] = _key(xf.aep_statio, xf.aep_circui)
-        xf_to_key = dict(zip(xf.location_n, xf.key))
-        dev_frames.append(xf[["circuit_id", "key"]])
+    transformer_to_circuit, circuit_id_to_key, devices_per_circuit = _circuit_lookup(store)
 
-    device_counts = collections.Counter()
-    for name in ("fuses", "reclosers", "switches"):
-        df = _read(store, name)
-        if df is None:
-            continue
-        df["key"] = _key(df.aep_statio, df.aep_circui)
-        dev_frames.append(df[["circuit_id", "key"]])
-        if name in ("fuses", "reclosers"):
-            device_counts.update(df["key"])
+    features, premise_to_circuit, zip_counts = _customer_features(store, transformer_to_circuit, circuit_id_to_key)
 
-    circuit_id_to_key = {}
-    if dev_frames:
-        d = pd.concat(dev_frames)
-        circuit_id_to_key = d.groupby("circuit_id")["key"].agg(lambda s: s.value_counts().index[0]).to_dict()
+    line_features, lines_in_meters = _line_features(store)
+    if line_features is not None:
+        features = features.join(line_features, how="outer") if len(features) else line_features
 
-    # --- customers: aggregate only. No coordinates, addresses or life-support flag loaded. ---
-    cust = _read(store, "customers", columns=["aep_xfmr_l", "circuit_id", "kind_of_se", "city", "premise_nu",
-                                              "service_po", "service__1"])
-    zip_by_key = None
-    premise_to_key = {}
-    feats = pd.DataFrame()
-    if cust is not None:
-        k = cust.aep_xfmr_l.map(xf_to_key)
-        k = k.fillna(cust.circuit_id.map(circuit_id_to_key))
-        cust["key"] = k
-        cust = cust.dropna(subset=["key"])
-        premise_to_key = dict(zip(cust.premise_nu, cust.key))
-        zip_by_key = _zip_counts(store, cust)  # uses customer points once, then they are dropped
-        g = cust.groupby("key")
-        feats = pd.DataFrame({
-            "n_customers": g.size(),
-            "overhead_share": g.kind_of_se.agg(lambda s: (s == "Overhead").mean()),
-            "city": g.city.agg(lambda s: s[s != "??"].value_counts().index[0] if (s != "??").any() else "Local"),
-        })
-        del cust
+    if lines_in_meters is not None:
+        pole_features = _pole_features(store, lines_in_meters)
+        if pole_features is not None:
+            features = features.join(pole_features, how="left")
 
-    # --- primary lines: exposure features, also used for facility proximity and pole matching ---
-    prim = _read(store, "primary", geometry=True)
-    prim_m = None
-    if prim is not None:
-        prim["key"] = _key(prim.aep_statio, prim.aep_circui)
-        g = prim.groupby("key")
-        pf = pd.DataFrame({
-            "primary_miles": g.report_len.sum() / 5280.0,  # report_len is in feet
-            "backbone_share": g.usage.agg(lambda s: (s == "Backbone").mean()),
-        })
-        feats = feats.join(pf, how="outer") if len(feats) else pf
-        prim_m = prim[["key", "geometry"]].to_crs(METRIC_CRS)
-        del prim
+    if len(features):
+        features["protective_devices"] = pd.Series(devices_per_circuit).reindex(features.index).fillna(0)
 
-    # --- poles: match each pole to the nearest primary line to get its circuit ---
-    poles = _read(store, "poles", geometry=True)
-    if poles is not None and prim_m is not None:
-        import geopandas as gpd
+    features["critical_facility_nearby"] = False
+    if lines_in_meters is not None and len(features):
+        features["critical_facility_nearby"] = features.index.isin(_critical_facility_flags(store, lines_in_meters))
 
-        poles = poles[poles.owner_type == "Company Owned"].to_crs(METRIC_CRS)
-        j = gpd.sjoin_nearest(poles, prim_m, how="inner", max_distance=30)
-        j = j[~j.index.duplicated()]
-        age = (pd.Timestamp("2026-01-01") - j.date_insta).dt.days / 365.25
-        mat = j.material.astype(str).str.lower()
-        j = j.assign(age=age, wood=~mat.isin(NON_WOOD))
-        g = j.groupby("key")
-        pl = pd.DataFrame({"n_poles": g.size(), "pole_age_years": g.age.mean(), "wood_share": g.wood.mean()})
-        feats = feats.join(pl, how="left")
-        del poles, j
+    topology = _topology_features(store, premise_to_circuit)
+    if topology is not None:
+        features = features.join(topology, how="left")
 
-    if len(feats):
-        feats["protective_devices"] = pd.Series(device_counts)
-        feats["protective_devices"] = feats["protective_devices"].fillna(0)
+    history = _damage_history(store)
+    if history is not None:
+        features = features.join(history, how="left")
 
-    # --- critical facilities: reduce to a per-circuit yes/no, then drop everything else ---
-    feats["critical_facility_nearby"] = False
-    if prim_m is not None and len(feats):
-        import geopandas as gpd
-
-        fac = []
-        for name in ("hospitals", "fire", "ambulance"):
-            f = _read(store, name, columns=[], geometry=True)
-            if f is not None:
-                fac.append(f[["geometry"]].to_crs(METRIC_CRS))
-        if fac:
-            fac = gpd.GeoDataFrame(pd.concat(fac, ignore_index=True), crs=METRIC_CRS)
-            fac["geometry"] = fac.geometry.buffer(CRITICAL_FACILITY_RADIUS_M)
-            hit = gpd.sjoin(prim_m, fac, how="inner", predicate="intersects")
-            near_keys = set(hit["key"])
-            feats["critical_facility_nearby"] = feats.index.isin(near_keys)
-            del fac, hit
-    del prim_m
-
-    # --- topology: premise -> upstream devices. Zone device = nearest recloser, else breaker. ---
-    if FILES["topology"].exists() and premise_to_key:
-        try:
-            graph = nx.DiGraph()
-            behind = collections.Counter()   # customers behind each device (any level)
-            chains_of_key = collections.defaultdict(collections.Counter)
-            zone_of_key = collections.defaultdict(collections.Counter)
-            depth_sum = collections.Counter()
-            depth_n = collections.Counter()
-            rows = 0
-            with open(FILES["topology"], encoding="utf-8", errors="replace") as fh:
-                for line in fh:
-                    parts = line.rstrip("\n").split("\t")
-                    key = premise_to_key.get(parts[0])
-                    if key is None or len(parts) < 3:
-                        continue
-                    rows += 1
-                    chain = []
-                    for p in parts[1:]:
-                        f = p.split("*")
-                        if len(f) >= 4:
-                            chain.append((f[2], f[3]))
-                    for (_, a), (_, b) in zip(chain, chain[1:]):
-                        graph.add_edge(a, b)  # downstream -> upstream
-                    zone = next((c for c in chain if c[0].startswith("Recloser")), chain[-1])
-                    zone_type = "recloser" if zone[0].startswith("Recloser") else "circuit breaker"
-                    for _, dev_id in chain:
-                        behind[dev_id] += 1
-                    chains_of_key[key][tuple(chain)] += 1
-                    zone_of_key[key][(zone_type, zone[1])] += 1
-                    depth_sum[key] += sum(1 for c in chain[1:] if c[0] != "Circuit Breaker")
-                    depth_n[key] += 1
-            topo = {}
-            for key, zones in zone_of_key.items():
-                (ztype, zid), _ = zones.most_common(1)[0]
-                topo[key] = {
-                    "upstream_device_type": ztype,
-                    "customers_on_upstream_device": behind[zid],
-                    "devices_to_breaker": depth_sum[key] / max(depth_n[key], 1),
-                    "upstream_chain": _chain_steps(chains_of_key[key].most_common(1)[0][0], behind),
-                }
-            feats = feats.join(pd.DataFrame.from_dict(topo, orient="index"), how="left")
-            store.report["topology"] = {"status": "ok", "rows": rows,
-                                        "detail": f"graph {graph.number_of_nodes()} devices"}
-        except Exception as e:  # noqa: BLE001
-            store.report["topology"] = {"status": "error", "rows": 0, "detail": str(e)[:200]}
-            log.exception("data: topology parse failed")
-    else:
-        store.report["topology"] = {"status": "missing", "rows": 0, "detail": "file or customers missing"}
-
-    # --- ARCOS damage history ---
-    arcos = _read(store, "arcos")
-    if arcos is not None:
-        arcos = arcos.drop(columns=[c for c in ("Longitude", "Latitude") if c in arcos.columns])
-        arcos["key"] = _key(arcos.Substation, arcos.Circuit)
-        arcos["damage_class"] = arcos.Asset_Type.astype(str).str.lower().map(ARCOS_CLASS).fillna("other_equipment")
-        arcos["repair_days"] = (arcos.Repaired_D - arcos.Report_Tim).dt.days
-        events = _events(arcos.Report_Tim)
-        bounds = [(e["start"], e["end"]) for e in events]
-        arcos["event_id"] = [next(i for i, (s, e) in enumerate(bounds) if s <= d <= e)
-                             for d in arcos.Report_Tim.dt.normalize()]
-        ref = max(events, key=lambda e: e["records"])
-        store.events = events
-        store.reference_event = {
-            "id": ref["id"], "start": ref["start"].date().isoformat(), "end": ref["end"].date().isoformat(),
-            "records": ref["records"], "label": ref["start"].strftime("%B %Y") + " storm",
-        }
-        in_ref = arcos.event_id == ref["id"]
-        pre = arcos.Report_Tim < ref["start"]
-        g = arcos.groupby("key")
-        hist = pd.DataFrame({
-            "hist_records": g.size(),
-            "hist_events": g.event_id.nunique(),
-            "hist_access_rate": g.Access_Iss.agg(lambda s: (s == "Yes").mean()),
-            "open_damage": g.Repaired.agg(lambda s: (s == "No").sum()),
-            "median_repair_days": arcos[arcos.Repaired == "Yes"].groupby("key").repair_days.median(),
-        })
-        hist["pre_records"] = arcos[pre].groupby("key").size()
-        hist["ref_records"] = arcos[in_ref].groupby("key").size()
-        for cls in DAMAGE_CLASSES:
-            hist[f"ref_{cls}"] = arcos[in_ref & (arcos.damage_class == cls)].groupby("key").size()
-        mix = arcos[in_ref].damage_class.value_counts(normalize=True)
-        store.damage_mix = {c: float(mix.get(c, 0.0)) for c in DAMAGE_CLASSES}
-        feats = feats.join(hist, how="left")
-        store.arcos = arcos[["key", "Report_Tim", "Repaired", "damage_class", "Access_Iss", "event_id", "repair_days"]]
-
-    if not len(feats):
+    if not len(features):
         return
 
-    count_cols = ["hist_records", "hist_events", "open_damage", "pre_records", "ref_records"] + \
-                 [f"ref_{c}" for c in DAMAGE_CLASSES]
-    for c in count_cols:
-        if c in feats:
-            feats[c] = feats[c].fillna(0).astype(int)
-    store.circuits = feats
+    # Counts that are missing mean "none", so fill them with 0.
+    count_columns = ["hist_records", "hist_events", "open_damage", "pre_records", "ref_records"]
+    count_columns += [f"ref_{c}" for c in DAMAGE_CLASSES]
+    for column in count_columns:
+        if column in features:
+            features[column] = features[column].fillna(0).astype(int)
+    store.circuits = features
 
-    # --- selectable anonymized locations ---
-    if "n_customers" in feats:
-        loc = feats[feats.n_customers >= MIN_CUSTOMERS_PER_LOCATION].copy().sort_index()
-        loc["area_no"] = loc.groupby("city").cumcount() + 1
-        loc = loc.reset_index(names="key")
-        loc["location_id"] = [f"LOC-{i + 1:03d}" for i in range(len(loc))]
-        loc["label"] = loc.city.str.title() + " area " + loc.area_no.astype(str)
-        loc["customers_served_band"] = loc.n_customers.map(_customers_band)
-        loc["has_storm_history"] = loc.get("hist_records", pd.Series(0, index=loc.index)) > 0
-        store.locations = loc[["location_id", "key", "label", "customers_served_band", "has_storm_history"]]
-        store.zip_index, store.zip_weights = _zip_index(zip_by_key, set(loc.key))
+    if "n_customers" in features:
+        _make_locations(store, features, zip_counts)
+
+
+def _circuit_lookup(store: Store):
+    """Step 1. Find the circuit key for every transformer, and for every circuit id.
+
+    The customer file says which transformer serves each customer. The transformer file says which
+    station and circuit that transformer is on. Fuses, reclosers and switches give a second way to
+    map a circuit id to the same key, which we use when a customer's transformer is missing.
+
+    Returns: transformer_to_circuit, circuit_id_to_key, devices_per_circuit (fuses + reclosers only)."""
+    id_and_key_tables = []
+    transformer_to_circuit = {}
+
+    transformers = _read(store, "transformers")
+    if transformers is not None:
+        transformers["key"] = _key(transformers.aep_statio, transformers.aep_circui)
+        transformer_to_circuit = dict(zip(transformers.location_n, transformers.key))
+        id_and_key_tables.append(transformers[["circuit_id", "key"]])
+
+    devices_per_circuit = collections.Counter()
+    for name in ("fuses", "reclosers", "switches"):
+        devices = _read(store, name)
+        if devices is None:
+            continue
+        devices["key"] = _key(devices.aep_statio, devices.aep_circui)
+        id_and_key_tables.append(devices[["circuit_id", "key"]])
+        if name in ("fuses", "reclosers"):
+            devices_per_circuit.update(devices["key"])
+
+    circuit_id_to_key = {}
+    if id_and_key_tables:
+        all_pairs = pd.concat(id_and_key_tables)
+        # A circuit id can appear with slightly different keys. Use the most common one.
+        circuit_id_to_key = all_pairs.groupby("circuit_id")["key"].agg(lambda keys: keys.value_counts().index[0]).to_dict()
+    return transformer_to_circuit, circuit_id_to_key, devices_per_circuit
+
+
+def _customer_features(store: Store, transformer_to_circuit: dict, circuit_id_to_key: dict):
+    """Step 2. One row per circuit with the number of customers and how many are on overhead lines.
+
+    Privacy: we never keep customer names, addresses, premise ids, or the life-support flag. Customer
+    coordinates are used once to match customers to ZIP codes and are then thrown away.
+
+    Returns: features table, premise_to_circuit (used for the topology step), zip_counts."""
+    wanted = ["aep_xfmr_l", "circuit_id", "kind_of_se", "city", "premise_nu", "service_po", "service__1"]
+    customers = _read(store, "customers", columns=wanted)
+    if customers is None:
+        return pd.DataFrame(), {}, None
+
+    # Prefer the transformer's circuit. Fall back to the circuit id.
+    customers["key"] = customers.aep_xfmr_l.map(transformer_to_circuit)
+    customers["key"] = customers["key"].fillna(customers.circuit_id.map(circuit_id_to_key))
+    customers = customers.dropna(subset=["key"])
+
+    premise_to_circuit = dict(zip(customers.premise_nu, customers.key))
+    zip_counts = _zip_counts(store, customers)
+
+    def most_common_city(cities: pd.Series) -> str:
+        known = cities[cities != "??"]
+        return known.value_counts().index[0] if len(known) else "Local"
+
+    by_circuit = customers.groupby("key")
+    features = pd.DataFrame({
+        "n_customers": by_circuit.size(),
+        "overhead_share": by_circuit.kind_of_se.agg(lambda s: (s == "Overhead").mean()),
+        "city": by_circuit.city.agg(most_common_city),
+    })
+    return features, premise_to_circuit, zip_counts
+
+
+def _line_features(store: Store):
+    """Step 3. Miles of primary power line per circuit. More line means more that a storm can hit.
+
+    Returns: the features, and the line shapes in meters (kept for the pole and facility steps)."""
+    lines = _read(store, "primary", geometry=True)
+    if lines is None:
+        return None, None
+    lines["key"] = _key(lines.aep_statio, lines.aep_circui)
+    by_circuit = lines.groupby("key")
+    features = pd.DataFrame({
+        "primary_miles": by_circuit.report_len.sum() / 5280.0,  # the file stores feet
+        "backbone_share": by_circuit.usage.agg(lambda s: (s == "Backbone").mean()),
+    })
+    return features, lines[["key", "geometry"]].to_crs(METRIC_CRS)
+
+
+def _pole_features(store: Store, lines_in_meters):
+    """Step 4. Pole age and share of wood poles per circuit.
+
+    Poles have no circuit field, so each company-owned pole is matched to the nearest power line
+    (within 30 meters) and takes that line's circuit."""
+    import geopandas as gpd
+
+    poles = _read(store, "poles", geometry=True)
+    if poles is None:
+        return None
+    poles = poles[poles.owner_type == "Company Owned"].to_crs(METRIC_CRS)
+    matched = gpd.sjoin_nearest(poles, lines_in_meters, how="inner", max_distance=30)
+    matched = matched[~matched.index.duplicated()]  # a pole equally close to two lines counts once
+    age_years = (pd.Timestamp("2026-01-01") - matched.date_insta).dt.days / 365.25
+    is_wood = ~matched.material.astype(str).str.lower().isin(NON_WOOD)
+    matched = matched.assign(age=age_years, wood=is_wood)
+    by_circuit = matched.groupby("key")
+    return pd.DataFrame({"n_poles": by_circuit.size(), "pole_age_years": by_circuit.age.mean(),
+                         "wood_share": by_circuit.wood.mean()})
+
+
+def _critical_facility_flags(store: Store, lines_in_meters) -> set:
+    """Step 5. The circuits that have a hospital, fire station, or ambulance station nearby.
+
+    Privacy: only a yes/no per circuit is kept. Names and locations of the facilities are dropped
+    straight away and never leave this function."""
+    import geopandas as gpd
+
+    shapes = []
+    for name in ("hospitals", "fire", "ambulance"):
+        places = _read(store, name, columns=[], geometry=True)
+        if places is not None:
+            shapes.append(places[["geometry"]].to_crs(METRIC_CRS))
+    if not shapes:
+        return set()
+    nearby_zones = gpd.GeoDataFrame(pd.concat(shapes, ignore_index=True), crs=METRIC_CRS)
+    nearby_zones["geometry"] = nearby_zones.geometry.buffer(CRITICAL_FACILITY_RADIUS_M)
+    touching = gpd.sjoin(lines_in_meters, nearby_zones, how="inner", predicate="intersects")
+    return set(touching["key"])
+
+
+def _topology_features(store: Store, premise_to_circuit: dict):
+    """Step 6. For each circuit, which device sits upstream and how many customers depend on it.
+
+    The topology file has one line per customer premise: a chain of devices from the premise's
+    transformer up to the substation breaker, separated by tabs. For each circuit we keep:
+      - the most common chain of devices (shown as "what your power depends on")
+      - the closest recloser upstream, or the breaker if there is none (the "zone" device)
+      - how many customers sit behind each device (to say "serves about 650 customers")"""
+    path = FILES["topology"]
+    if not path.exists() or not premise_to_circuit:
+        store.report["topology"] = {"status": "missing", "rows": 0, "detail": "file or customers missing"}
+        return None
+    try:
+        customers_behind = collections.Counter()                             # device id -> customers
+        chain_counts = collections.defaultdict(collections.Counter)          # circuit -> chain -> premises
+        zone_counts = collections.defaultdict(collections.Counter)           # circuit -> zone device -> premises
+        devices_between = collections.Counter()                              # circuit -> total non-breaker devices
+        premises = collections.Counter()                                     # circuit -> premises read
+        seen_devices = set()
+        rows = 0
+
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                fields = line.rstrip("\n").split("\t")
+                circuit = premise_to_circuit.get(fields[0])
+                if circuit is None or len(fields) < 3:
+                    continue
+                rows += 1
+                # Each device looks like "table*id*Type*location". We want (Type, id).
+                chain = []
+                for text in fields[1:]:
+                    parts = text.split("*")
+                    if len(parts) >= 4:
+                        chain.append((parts[2], parts[3]))
+                if not chain:
+                    continue
+                for _, device_id in chain:
+                    customers_behind[device_id] += 1
+                    seen_devices.add(device_id)
+                zone_type, zone_id = next(((t, i) for t, i in chain if t.startswith("Recloser")), chain[-1])
+                zone_type = "recloser" if zone_type.startswith("Recloser") else "circuit breaker"
+                chain_counts[circuit][tuple(chain)] += 1
+                zone_counts[circuit][(zone_type, zone_id)] += 1
+                devices_between[circuit] += sum(1 for t, _ in chain[1:] if t != "Circuit Breaker")
+                premises[circuit] += 1
+
+        per_circuit = {}
+        for circuit, zones in zone_counts.items():
+            (zone_type, zone_id), _ = zones.most_common(1)[0]
+            typical_chain = chain_counts[circuit].most_common(1)[0][0]
+            per_circuit[circuit] = {
+                "upstream_device_type": zone_type,
+                "customers_on_upstream_device": customers_behind[zone_id],
+                "devices_to_breaker": devices_between[circuit] / max(premises[circuit], 1),
+                "upstream_chain": _chain_steps(typical_chain, customers_behind),
+            }
+        store.report["topology"] = {"status": "ok", "rows": rows, "detail": f"{len(seen_devices)} devices"}
+        return pd.DataFrame.from_dict(per_circuit, orient="index")
+    except Exception as error:  # noqa: BLE001 - a bad topology file must not stop the app
+        store.report["topology"] = {"status": "error", "rows": 0, "detail": str(error)[:200]}
+        log.exception("data: topology parse failed")
+        return None
+
+
+def _damage_history(store: Store):
+    """Step 7. Past storm damage per circuit, from the ARCOS damage records.
+
+    Also remembers (on the store) the records themselves without coordinates, the storm events, and
+    which event was the biggest (the "reference storm", Feb 2025)."""
+    records = _read(store, "arcos")
+    if records is None:
+        return None
+    records = records.drop(columns=[c for c in ("Longitude", "Latitude") if c in records.columns])  # privacy
+    records["key"] = _key(records.Substation, records.Circuit)
+    records["damage_class"] = records.Asset_Type.astype(str).str.lower().map(ARCOS_CLASS).fillna("other_equipment")
+    records["repair_days"] = (records.Repaired_D - records.Report_Tim).dt.days
+
+    # Label every record with the storm event it belongs to.
+    events = _events(records.Report_Tim)
+    event_of_day = {}
+    for event in events:
+        for day in pd.date_range(event["start"], event["end"]):
+            event_of_day[day] = event["id"]
+    records["event_id"] = records.Report_Tim.dt.normalize().map(event_of_day)
+
+    biggest = max(events, key=lambda e: e["records"])
+    store.events = events
+    store.reference_event = {
+        "id": biggest["id"], "start": biggest["start"].date().isoformat(), "end": biggest["end"].date().isoformat(),
+        "records": biggest["records"], "label": biggest["start"].strftime("%B %Y") + " storm",
+    }
+
+    in_biggest = records.event_id == biggest["id"]
+    before_biggest = records.Report_Tim < biggest["start"]
+    by_circuit = records.groupby("key")
+    history = pd.DataFrame({
+        "hist_records": by_circuit.size(),
+        "hist_events": by_circuit.event_id.nunique(),
+        "hist_access_rate": by_circuit.Access_Iss.agg(lambda s: (s == "Yes").mean()),
+        "open_damage": by_circuit.Repaired.agg(lambda s: (s == "No").sum()),
+        "median_repair_days": records[records.Repaired == "Yes"].groupby("key").repair_days.median(),
+    })
+    history["pre_records"] = records[before_biggest].groupby("key").size()   # history before the big storm
+    history["ref_records"] = records[in_biggest].groupby("key").size()       # damage in the big storm
+    for damage_class in DAMAGE_CLASSES:
+        history[f"ref_{damage_class}"] = records[in_biggest & (records.damage_class == damage_class)].groupby("key").size()
+
+    mix = records[in_biggest].damage_class.value_counts(normalize=True)
+    store.damage_mix = {c: float(mix.get(c, 0.0)) for c in DAMAGE_CLASSES}
+    store.arcos = records[["key", "Report_Tim", "Repaired", "damage_class", "Access_Iss", "event_id", "repair_days"]]
+    return history
+
+
+def _make_locations(store: Store, features: pd.DataFrame, zip_counts) -> None:
+    """Step 8. The anonymous list of areas: one per circuit with enough customers.
+
+    Names are the city plus a number ("Roanoke area 3"). Internal circuit keys are never shown."""
+    eligible = features[features.n_customers >= MIN_CUSTOMERS_PER_LOCATION].copy().sort_index()
+    eligible["area_number"] = eligible.groupby("city").cumcount() + 1
+    eligible = eligible.reset_index(names="key")
+    eligible["location_id"] = [f"LOC-{i + 1:03d}" for i in range(len(eligible))]
+    eligible["label"] = eligible.city.str.title() + " area " + eligible.area_number.astype(str)
+    eligible["customers_served_band"] = eligible.n_customers.map(_customers_band)
+    eligible["has_storm_history"] = eligible.get("hist_records", pd.Series(0, index=eligible.index)) > 0
+    store.locations = eligible[["location_id", "key", "label", "customers_served_band", "has_storm_history"]]
+    store.zip_index, store.zip_weights = _zip_index(zip_counts, set(eligible.key))
 
 
 def _load_zip_table() -> pd.DataFrame | None:

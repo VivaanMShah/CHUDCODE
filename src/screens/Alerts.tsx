@@ -175,6 +175,8 @@ export default function Alerts() {
       </header>
 
       <div className="stack">
+        <PhoneAlerts />
+
         {/* Real weather alerts from the National Weather Service */}
         <section className="card" aria-label="Weather alerts">
           <span className="eyebrow">Weather alerts · National Weather Service</span>
@@ -238,8 +240,6 @@ export default function Alerts() {
             </li>
           </ul>
         </section>
-
-        <PhoneAlerts />
 
         <SmsDemo />
 
