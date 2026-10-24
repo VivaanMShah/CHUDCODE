@@ -89,7 +89,7 @@ export default function SmsDemo() {
   return (
     <section className="card sms" aria-label="Text alerts demo">
       <div className="sms__top">
-        <span className="eyebrow">Text alerts</span>
+        <span className="eyebrow">Text message preview</span>
         <span className="sms__demo">Demo</span>
       </div>
 
@@ -101,7 +101,7 @@ export default function SmsDemo() {
             if (valid && consent) void play();
           }}
         >
-          <p className="sms__lead">Get a text when your outage risk changes, and when power is back.</p>
+          <p className="sms__lead">See what a text alert would look like.</p>
           <label className="sms__field">
             <span>Mobile number</span>
             <input
@@ -122,7 +122,7 @@ export default function SmsDemo() {
             Turn on text alerts
           </button>
           <p id="sms-note" className="sms__note">
-            This is a demo. No texts are sent, and your number is not saved or sent anywhere. Use any fake number.
+            Preview only. Real texts need a registered sending number, so use Phone alerts above for real notifications. No texts are sent, and your number is not saved or sent anywhere. Any fake number works.
           </p>
         </form>
       ) : (

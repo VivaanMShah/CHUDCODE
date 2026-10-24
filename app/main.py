@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 from pathlib import Path as FsPath
+import asyncio
+import base64
+import hashlib
 import json
 import logging
 import os
@@ -19,7 +23,8 @@ from fastapi import FastAPI, HTTPException, Path, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .models import (AssessRequest, AssessResponse, ChatRequest, ChatResponse, HealthResponse, LocationsResponse,
+from .models import (AlertConfig, AlertIdRequest, AlertSubscribeRequest, AlertSubscribed, AlertTestResult,
+                     AssessRequest, AssessResponse, ChatRequest, ChatResponse, HealthResponse, LocationsResponse,
                      MessageRequest, MessageResponse, WeatherResponse, ZipResponse)
 
 # ============================================================================
@@ -124,7 +129,9 @@ STATE: engines.State | None = None
 async def lifespan(app: FastAPI):
     global STATE
     STATE = engines.startup()
+    loop = asyncio.create_task(_alert_loop())
     yield
+    loop.cancel()
 
 
 app = FastAPI(title="AI Outage Concierge", version="1.0.0", lifespan=lifespan)
@@ -147,14 +154,14 @@ class StripApiPrefix:
 
 app.add_middleware(StripApiPrefix)
 
-_chat_hits: dict[str, deque] = defaultdict(deque)
+_chat_hits: dict[tuple, deque] = defaultdict(deque)
 
 
-def _rate_limited(request: Request, limit: int = 20, window: float = 60.0) -> bool:
+def _rate_limited(request: Request, limit: int = 20, window: float = 60.0, bucket: str = "chat") -> bool:
     """Small per-visitor limit on /chat so one client can't run up the Bedrock bill."""
     ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
           or (request.client.host if request.client else "?"))
-    now, q = time.time(), _chat_hits[ip]
+    now, q = time.time(), _chat_hits[(bucket, ip)]
     while q and now - q[0] > window:
         q.popleft()
     if len(q) >= limit:
@@ -265,6 +272,201 @@ def live_weather(zip_code: str = ZIP_PATH):
     if loc is None:
         raise HTTPException(404, "We don't have outage data for that ZIP code yet.")
     return {"location_id": loc.location_id, **engines.live_weather(s.weather_model, loc.lat, loc.lon)}
+
+
+# ============================================================================
+# PHONE ALERTS (web push)
+# Alerts that arrive on a phone like a text. Real SMS needs a carrier-registered sending number, which this
+# AWS account does not have, so this uses web push: add the site to the home screen and allow notifications.
+# We keep only the push address and the ZIP (no name or phone number) and delete both on turn-off.
+# ============================================================================
+
+PUSH_HOSTS = (".googleapis.com", ".mozilla.com", ".push.apple.com", ".notify.windows.com")  # real push services only
+ALERT_TTL_DAYS = 30
+ALERT_CHECK_SECONDS = 600
+
+
+class AlertStore:
+    """Subscriptions live in DynamoDB in AWS (ALERTS_TABLE), and in memory when running locally."""
+
+    def __init__(self):
+        self.mem: dict[str, dict] = {}
+        self.table = None
+        name = os.getenv("ALERTS_TABLE")
+        if name:
+            import boto3
+
+            self.table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION") or "us-east-1").Table(name)
+
+    def put(self, item: dict) -> None:
+        item = {**item, "ttl": int(time.time()) + ALERT_TTL_DAYS * 86400}
+        if self.table:
+            self.table.put_item(Item=item)
+        else:
+            self.mem[item["id"]] = item
+
+    def get(self, sub_id: str) -> dict | None:
+        if self.table:
+            return self.table.get_item(Key={"id": sub_id}).get("Item")
+        return self.mem.get(sub_id)
+
+    def delete(self, sub_id: str) -> None:
+        if self.table:
+            self.table.delete_item(Key={"id": sub_id})
+        else:
+            self.mem.pop(sub_id, None)
+
+    def all(self) -> list[dict]:
+        if not self.table:
+            return list(self.mem.values())
+        items, kw = [], {}
+        while True:
+            r = self.table.scan(**kw)
+            items += r.get("Items", [])
+            if "LastEvaluatedKey" not in r:
+                return items
+            kw["ExclusiveStartKey"] = r["LastEvaluatedKey"]
+
+
+ALERTS = AlertStore()
+_vapid_key = None
+
+
+def _vapid():
+    """The signing key. In AWS it comes from the VAPID_PRIVATE_PEM secret; locally a temporary one is made."""
+    global _vapid_key
+    if _vapid_key is None:
+        from py_vapid import Vapid
+
+        pem = os.getenv("VAPID_PRIVATE_PEM")
+        if pem:
+            _vapid_key = Vapid.from_pem(pem.encode())
+        else:
+            log.warning("alerts: no VAPID_PRIVATE_PEM, using a temporary key (subscriptions will not survive a restart)")
+            _vapid_key = Vapid()
+            _vapid_key.generate_keys()
+    return _vapid_key
+
+
+def _public_key() -> str:
+    from cryptography.hazmat.primitives import serialization
+
+    raw = _vapid().public_key.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def _valid_endpoint(endpoint: str) -> bool:
+    u = urlparse(endpoint)
+    host = u.hostname or ""
+    return u.scheme == "https" and any(host.endswith(h) or host == h.lstrip(".") for h in PUSH_HOSTS)
+
+
+def push(sub: dict, payload: dict) -> str:
+    """Send one notification. Returns 'ok', 'gone' (the phone unsubscribed), or 'error'."""
+    from pywebpush import WebPushException, webpush
+
+    try:
+        webpush(subscription_info=sub, data=json.dumps(payload), vapid_private_key=_vapid(),
+                vapid_claims={"sub": os.getenv("VAPID_CONTACT", "mailto:outage-concierge@example.com")},
+                ttl=3600, timeout=10)
+        return "ok"
+    except WebPushException as e:
+        return "gone" if getattr(e.response, "status_code", None) in (404, 410) else "error"
+    except Exception:  # noqa: BLE001
+        log.warning("alerts: push failed", exc_info=True)
+        return "error"
+
+
+def _sub_of(item: dict) -> dict:
+    return json.loads(item["subscription"])
+
+
+def check_alerts(state) -> int:
+    """Look at the weather for every subscribed ZIP and push once per change. Returns pushes sent."""
+    sent, by_zip = 0, defaultdict(list)
+    for item in ALERTS.all():
+        by_zip[item["zip"]].append(item)
+    for zip_code, items in by_zip.items():
+        loc = resolve(state.store, f"ZIP-{zip_code}")
+        if loc is None or loc.lat is None:
+            continue
+        wx = engines.live_weather(state.weather_model, loc.lat, loc.lon)
+        if wx["fallback"]:
+            continue
+        events = sorted(a["event"] for a in (wx["alerts"] or []))
+        sev = wx["severity"]
+        if sev < 3 and not events:
+            continue
+        key = f"{time.strftime('%Y-%m-%d')}|{sev if sev >= 3 else 0}|{','.join(events)}"
+        if events:
+            body = f"{events[0]}{' and more' if len(events) > 1 else ''}. Open the app for what to do."
+        else:
+            body = (f"{wx['severity_label']} expected {wx['peak_day']}. Chance of a damaging day: {wx['chance_pct']}%. "
+                    "Open the app for your outage risk.")
+        for item in items:
+            if item.get("last_key") == key:
+                continue
+            result = push(_sub_of(item), {"title": f"Storm alert for ZIP {zip_code}", "body": body, "url": "/"})
+            if result == "gone":
+                ALERTS.delete(item["id"])
+            elif result == "ok":
+                ALERTS.put({**item, "last_key": key})
+                sent += 1
+    return sent
+
+
+async def _alert_loop():
+    while True:
+        await asyncio.sleep(ALERT_CHECK_SECONDS)
+        try:
+            n = await asyncio.to_thread(check_alerts, STATE)
+            if n:
+                log.info("alerts: sent %d notification(s)", n)
+        except Exception:  # noqa: BLE001
+            log.exception("alerts: check failed")
+
+
+@app.get("/alerts/config", response_model=AlertConfig)
+def alerts_config():
+    return {"available": True, "public_key": _public_key()}
+
+
+@app.post("/alerts/subscribe", response_model=AlertSubscribed)
+def alerts_subscribe(req: AlertSubscribeRequest, request: Request):
+    t0, rid = time.time(), new_request_id()
+    if _rate_limited(request, limit=10, bucket="subscribe"):
+        raise HTTPException(429, "Too many requests. Please wait a minute and try again.")
+    if resolve(_state().store, f"ZIP-{req.zip}") is None:
+        raise HTTPException(404, "We don't have outage data for that ZIP code yet.")
+    if not _valid_endpoint(req.subscription.endpoint):
+        raise HTTPException(422, "That does not look like a phone push address.")
+    sub_id = hashlib.sha256(req.subscription.endpoint.encode()).hexdigest()[:32]
+    ALERTS.put({"id": sub_id, "zip": req.zip, "created": int(time.time()), "last_key": "",
+                "subscription": json.dumps(req.subscription.model_dump())})
+    audit("/alerts/subscribe", rid, f"ZIP-{req.zip}", None, None, t0)
+    return {"id": sub_id, "zip": req.zip}
+
+
+@app.post("/alerts/test", response_model=AlertTestResult)
+def alerts_test(req: AlertIdRequest, request: Request):
+    """Send one notification right now, so a customer can see exactly what an alert looks like."""
+    if _rate_limited(request, limit=5, bucket="test"):
+        raise HTTPException(429, "Too many requests. Please wait a minute and try again.")
+    item = ALERTS.get(req.id)
+    if item is None:
+        raise HTTPException(404, "Turn on phone alerts first.")
+    result = push(_sub_of(item), {"title": "Test alert from Storm Watch",
+                                  "body": "This is what a storm alert looks like. Nothing is wrong right now.", "url": "/"})
+    if result == "gone":
+        ALERTS.delete(req.id)
+        return {"sent": False, "detail": "This phone turned alerts off. Turn them on again."}
+    return {"sent": result == "ok", "detail": "Sent. Check your phone." if result == "ok" else "The push service did not accept it. Try again."}
+
+
+@app.post("/alerts/unsubscribe")
+def alerts_unsubscribe(req: AlertIdRequest):
+    ALERTS.delete(req.id)
+    return {"ok": True}
 
 
 # The website (built by Docker). Must come last so API routes win.

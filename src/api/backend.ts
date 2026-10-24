@@ -62,6 +62,23 @@ export function askConcierge(
   });
 }
 
+// Phone alerts (web push). Only the phone's push address and the ZIP are sent.
+export function getAlertConfig(): Promise<{ available: boolean; public_key: string }> {
+  return call("/alerts/config");
+}
+
+export function subscribePush(subscription: PushSubscriptionJSON, zip: string): Promise<{ id: string; zip: string }> {
+  return call("/alerts/subscribe", { method: "POST", body: JSON.stringify({ subscription, zip }) });
+}
+
+export function testPush(id: string): Promise<{ sent: boolean; detail: string }> {
+  return call("/alerts/test", { method: "POST", body: JSON.stringify({ id }) });
+}
+
+export function unsubscribePush(id: string): Promise<{ ok: boolean }> {
+  return call("/alerts/unsubscribe", { method: "POST", body: JSON.stringify({ id }) });
+}
+
 export function assess(
   locationId: string,
   scenario: Scenario,

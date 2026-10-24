@@ -254,6 +254,41 @@ class WeatherResponse(BaseModel):
     model: Optional[WeatherModelInfo] = None
 
 
+class PushKeys(BaseModel):
+    p256dh: str = Field(..., max_length=200)
+    auth: str = Field(..., max_length=100)
+
+
+class PushSubscription(BaseModel):
+    endpoint: str = Field(..., max_length=600)
+    keys: PushKeys
+    expirationTime: Optional[float] = None
+
+
+class AlertSubscribeRequest(BaseModel):
+    subscription: PushSubscription
+    zip: str = Field(..., pattern=r"^\d{5}$")
+
+
+class AlertIdRequest(BaseModel):
+    id: str = Field(..., min_length=8, max_length=64)
+
+
+class AlertConfig(BaseModel):
+    available: bool
+    public_key: str
+
+
+class AlertSubscribed(BaseModel):
+    id: str
+    zip: str
+
+
+class AlertTestResult(BaseModel):
+    sent: bool
+    detail: str
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     data_mode: Literal["mock", "live"]

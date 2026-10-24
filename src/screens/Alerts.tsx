@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getMessage } from "../api/backend";
 import type { Band, MessageResponse, MessageType } from "../api/contract";
 import { CHANNEL_LABEL, bandLabel, useAssessment } from "../assessment";
+import PhoneAlerts from "../components/PhoneAlerts";
 import SmsDemo from "../components/SmsDemo";
 import { useLocation } from "../location";
 import { useProfile } from "../profile";
@@ -237,6 +238,8 @@ export default function Alerts() {
             </li>
           </ul>
         </section>
+
+        <PhoneAlerts />
 
         <SmsDemo />
 

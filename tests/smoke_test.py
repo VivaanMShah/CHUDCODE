@@ -118,6 +118,18 @@ def test_all():
         assert c.post("/chat", json={"location_id": with_hist, "question": "x" * 301}).status_code == 422
         assert c.post("/chat", json={"location_id": "LOC-999", "question": "hi"}).status_code == 404
         print(f"chat ok ({chb['source']}): {chb['answer'][:70]}")
+        # Phone alerts: config, validation, and clean-up (a fake address can't be pushed to, so no send here)
+        cfg = c.get("/alerts/config").json()
+        assert cfg["available"] and len(cfg["public_key"]) > 60
+        fake = {"endpoint": "https://fcm.googleapis.com/fcm/send/smoke", "keys": {"p256dh": "B" + "A" * 80, "auth": "x" * 22}}
+        sub = c.post("/alerts/subscribe", json={"subscription": fake, "zip": "24014"})
+        assert sub.status_code == 200, sub.text
+        evil = {**fake, "endpoint": "https://evil.example.com/x"}
+        assert c.post("/alerts/subscribe", json={"subscription": evil, "zip": "24014"}).status_code == 422
+        assert c.post("/alerts/unsubscribe", json={"id": sub.json()["id"]}).json()["ok"]
+        assert c.post("/alerts/test", json={"id": sub.json()["id"]}).status_code == 404
+        print("alerts ok: config, subscribe, bad-address guard, unsubscribe")
+
         assert c.get("/zip/99999").status_code == 404
         assert c.get("/zip/12ab5").status_code == 422
         assert c.post("/assess", json={"location_id": "ZIP-99999"}).status_code == 404

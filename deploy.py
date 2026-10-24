@@ -187,12 +187,22 @@ def ensure_all() -> dict:
         _ignore("ResourceAlreadyExistsException", lambda g=g: logs.create_log_group(logGroupName=g))
         logs.put_retention_policy(logGroupName=g, retentionInDays=14)
 
+    res["alerts_table"] = f"{NAME}-alerts"
+    table_arn = f"arn:aws:dynamodb:{REGION}:{acct}:table/{res['alerts_table']}"
+    vapid_name = f"/{NAME}/vapid-private-pem"
+    res["vapid_param"] = f"arn:aws:ssm:{REGION}:{acct}:parameter{vapid_name}"
+
     say("IAM roles")
     res["exec_role"] = ensure_role(f"{NAME}-exec", "ecs-tasks.amazonaws.com",
-                                   ["arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"], None)
+                                   ["arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"], {
+        "Version": "2012-10-17", "Statement": [  # lets ECS hand the push signing key to the container
+            {"Effect": "Allow", "Action": "ssm:GetParameters", "Resource": res["vapid_param"]},
+            {"Effect": "Allow", "Action": "kms:Decrypt", "Resource": "*"}]})
     res["task_role"] = ensure_role(f"{NAME}-task", "ecs-tasks.amazonaws.com", [], {
         "Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Resource": "*", "Action": [
-            "bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream", "bedrock:Converse", "bedrock:ConverseStream"]}]})
+            "bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream", "bedrock:Converse", "bedrock:ConverseStream"]},
+            {"Effect": "Allow", "Resource": table_arn, "Action": [
+                "dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:DeleteItem", "dynamodb:Scan"]}]})
     res["build_role"] = ensure_role(f"{NAME}-build", "codebuild.amazonaws.com", [], {
         "Version": "2012-10-17", "Statement": [
             {"Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*"},
@@ -202,6 +212,32 @@ def ensure_all() -> dict:
             {"Effect": "Allow", "Action": ["s3:GetObject", "s3:GetObjectVersion"], "Resource": f"arn:aws:s3:::{res['bucket']}/*"},
             {"Effect": "Allow", "Action": ["logs:CreateLogStream", "logs:PutLogEvents"], "Resource": "*"}]})
     time.sleep(10)  # let new roles propagate
+
+    say("Phone alerts storage")
+    ddb = client("dynamodb")
+    try:
+        ddb.describe_table(TableName=res["alerts_table"])
+    except bx.ClientError as e:
+        if e.response["Error"]["Code"] != "ResourceNotFoundException":
+            raise
+        ddb.create_table(TableName=res["alerts_table"], BillingMode="PAY_PER_REQUEST",
+                         AttributeDefinitions=[{"AttributeName": "id", "AttributeType": "S"}],
+                         KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}])
+        ddb.get_waiter("table_exists").wait(TableName=res["alerts_table"])
+        ddb.update_time_to_live(TableName=res["alerts_table"], TimeToLiveSpecification={"Enabled": True, "AttributeName": "ttl"})
+        say("  created the alerts table (entries expire after 30 days)")
+    ssm = client("ssm")
+    try:
+        ssm.get_parameter(Name=vapid_name)
+    except bx.ClientError as e:
+        if e.response["Error"]["Code"] != "ParameterNotFound":
+            raise
+        from py_vapid import Vapid  # installed with pywebpush
+
+        key = Vapid()
+        key.generate_keys()
+        ssm.put_parameter(Name=vapid_name, Value=key.private_pem().decode(), Type="SecureString")
+        say("  created the push signing key (kept in AWS, never in git)")
 
     say("Build project")
     cb = client("codebuild")
@@ -348,7 +384,9 @@ def task_definition(res: dict, tag: str) -> str:
                 {"name": "LLM_PROVIDER", "value": "bedrock"},
                 {"name": "CORS_ORIGINS", "value": ""},  # the site and API share one address
                 {"name": "AUDIT_TO_STDOUT", "value": "1"},
+                {"name": "ALERTS_TABLE", "value": res["alerts_table"]},
             ],
+            "secrets": [{"name": "VAPID_PRIVATE_PEM", "valueFrom": res["vapid_param"]}],
             "logConfiguration": {"logDriver": "awslogs", "options": {
                 "awslogs-group": f"/ecs/{NAME}", "awslogs-region": REGION, "awslogs-stream-prefix": "app"}},
         }])["taskDefinition"]["taskDefinitionArn"]

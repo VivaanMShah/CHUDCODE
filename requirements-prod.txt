@@ -8,3 +8,4 @@ scikit-learn==1.9.1
 scipy==1.18.1
 networkx==3.7
 boto3==1.43.118
+pywebpush==2.5.0
