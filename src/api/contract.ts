@@ -139,3 +139,45 @@ export interface MessageResponse {
   validated: boolean;
   meta: Meta;
 }
+
+// ---- ZIP search and live weather ------------------------------------------------
+
+export interface ZipResponse {
+  zip: string;
+  location_id: string; // "ZIP-24014": use with /assess, /message
+  label: string; // "ZIP 24014 · Roanoke"
+  city: string;
+  customers_served_band: string;
+}
+
+export interface WeatherHour {
+  hours_ahead: number;
+  label: string;
+  precip_in: number;
+  gust_mph: number;
+  wind_from_deg: number;
+  temp_f: number;
+}
+
+export interface NwsAlert {
+  event: string;
+  severity: string;
+  headline: string;
+  ends: string | null;
+  instruction: string | null;
+}
+
+export interface WeatherResponse {
+  location_id: string;
+  updated_at: string;
+  severity: number | null; // 1–5, null when live weather is unavailable
+  severity_label: string | null;
+  chance_pct: number | null;
+  peak_day: "today" | "tomorrow" | null;
+  reasons: Reason[];
+  hourly: WeatherHour[];
+  alerts: NwsAlert[] | null; // null = could not check
+  fallback: boolean;
+  fallback_reason: string | null;
+  model: { auc_out_of_time: number; damage_days: number; days: number } | null;
+}

@@ -7,22 +7,27 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ApiError, assess } from "./api/backend";
-import type { AssessResponse, Scenario } from "./api/contract";
+import { ApiError, assess, getWeather } from "./api/backend";
+import type { AssessResponse, Scenario, WeatherResponse } from "./api/contract";
 import { useLocation } from "./location";
 
 // ============================================================================
-// Storm scenario + the backend's assessment for the chosen area.
+// What every screen shares: live weather for the ZIP, the storm scenario, and the
+// backend's estimate for that scenario.
 //
-//   const { scenario, updateScenario, data, loading, error } = useAssessment();
+//   const { scenario, live, useLive, setUseLive, updateScenario, data } = useAssessment();
 //
-// Any change to the area or the scenario re-calls POST /assess (debounced),
-// so every screen shows the same, current estimate.
+// Live mode (default): storm strength comes from the weather forecast.
+// Simulate mode: the customer (or a judge) sets storm strength by hand.
+// Poles, crews, roads, and needs are always adjustable. Any change re-calls /assess.
 // ============================================================================
 
-const STORAGE_KEY = "storm-watch:scenario";
-const DEBOUNCE_MS = 300;
+const SCENARIO_KEY = "storm-watch:scenario";
 const LAST_KEY = "storm-watch:last-estimate";
+const DEBOUNCE_MS = 300;
+const WEATHER_REFRESH_MS = 10 * 60 * 1000;
+
+export const SEVERITY_LABEL = ["", "Calm", "Breezy or wet", "Stormy", "Damaging storm", "Severe storm"];
 
 export const DEFAULT_SCENARIO: Scenario = {
   storm_severity: 3,
@@ -33,38 +38,14 @@ export const DEFAULT_SCENARIO: Scenario = {
   backup_hours: null,
 };
 
-// Last good estimate, kept on the device so it still shows if cell service drops.
-interface SavedEstimate {
-  locationId: string;
-  savedAt: string;
-  data: AssessResponse;
-}
-
-function loadSavedEstimate(locationId: string): SavedEstimate | null {
-  try {
-    const raw = localStorage.getItem(LAST_KEY);
-    if (!raw) return null;
-    const v = JSON.parse(raw) as SavedEstimate;
-    return v && v.locationId === locationId && v.data ? v : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveEstimate(locationId: string, data: AssessResponse) {
-  try {
-    const savedAt = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    localStorage.setItem(LAST_KEY, JSON.stringify({ locationId, savedAt, data }));
-  } catch {
-    /* storage full or blocked: not critical */
-  }
-}
-
 interface AssessmentContextValue {
-  scenario: Scenario;
+  scenario: Scenario; // what is sent to the backend (live severity already applied)
   updateScenario: (patch: Partial<Scenario>) => void;
   resetScenario: () => void;
-  data: AssessResponse | null; // last good result (kept while a new one loads)
+  live: WeatherResponse | null;
+  useLive: boolean; // true = storm strength from live weather
+  setUseLive: (on: boolean) => void;
+  data: AssessResponse | null; // last good estimate (kept while a new one loads)
   savedAt: string | null; // set when showing a saved copy because the backend is unreachable
   loading: boolean;
   error: string | null;
@@ -73,59 +54,105 @@ interface AssessmentContextValue {
 
 const AssessmentContext = createContext<AssessmentContextValue | null>(null);
 
+// ---- Saved on this device only ------------------------------------------------
+
+function clamp(v: unknown, lo: number, hi: number, fallback: number): number {
+  return typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : fallback;
+}
+
 function loadScenario(): Scenario {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_SCENARIO;
-    const s = JSON.parse(raw) as Partial<Scenario>;
+    const s = JSON.parse(localStorage.getItem(SCENARIO_KEY) ?? "{}") as Partial<Scenario>;
+    const needs = ["medical_equipment", "accessibility", "critical_facility"];
     return {
-      storm_severity: clamp(s.storm_severity, 1, 5, DEFAULT_SCENARIO.storm_severity),
-      damaged_poles: clamp(s.damaged_poles, 0, 200, DEFAULT_SCENARIO.damaged_poles),
-      crews: clamp(s.crews, 1, 50, DEFAULT_SCENARIO.crews),
+      storm_severity: clamp(s.storm_severity, 1, 5, 3),
+      damaged_poles: clamp(s.damaged_poles, 0, 200, 0),
+      crews: clamp(s.crews, 1, 50, 2),
       access_ok: typeof s.access_ok === "boolean" ? s.access_ok : true,
-      declared_needs: Array.isArray(s.declared_needs)
-        ? s.declared_needs.filter((n) =>
-            ["medical_equipment", "accessibility", "critical_facility"].includes(n),
-          )
-        : [],
-      backup_hours:
-        typeof s.backup_hours === "number" ? clamp(s.backup_hours, 0, 168, 8) : null,
+      declared_needs: Array.isArray(s.declared_needs) ? s.declared_needs.filter((n) => needs.includes(n)) : [],
+      backup_hours: typeof s.backup_hours === "number" ? clamp(s.backup_hours, 0, 168, 8) : null,
     };
   } catch {
     return DEFAULT_SCENARIO;
   }
 }
 
-function clamp(v: unknown, lo: number, hi: number, fallback: number): number {
-  return typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : fallback;
+function loadLastEstimate(locationId: string): { savedAt: string; data: AssessResponse } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(LAST_KEY) ?? "null");
+    return v && v.locationId === locationId && v.data ? v : null;
+  } catch {
+    return null;
+  }
 }
+
+function saveLastEstimate(locationId: string, data: AssessResponse) {
+  try {
+    const savedAt = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    localStorage.setItem(LAST_KEY, JSON.stringify({ locationId, savedAt, data }));
+  } catch {
+    /* storage full or blocked: not critical */
+  }
+}
+
+// ---- Provider ------------------------------------------------------------------
 
 export function AssessmentProvider({ children }: { children: ReactNode }) {
   const { location, clearLocation } = useLocation();
   const locationId = location?.locationId;
+  const zip = location?.zip;
 
-  const [scenario, setScenario] = useState<Scenario>(loadScenario);
+  const [base, setBase] = useState<Scenario>(loadScenario);
+  const [useLive, setUseLive] = useState(true);
+  const [live, setLive] = useState<WeatherResponse | null>(null);
   const [data, setData] = useState<AssessResponse | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
+  // Live severity applies only in live mode and only when the weather model could score it.
+  const liveSeverity = useLive ? live?.severity ?? null : null;
+  const scenario = useMemo<Scenario>(
+    () => (liveSeverity ? { ...base, storm_severity: liveSeverity } : base),
+    [base, liveSeverity],
+  );
+
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(scenario));
+      localStorage.setItem(SCENARIO_KEY, JSON.stringify(base));
     } catch {
       /* not critical */
     }
-  }, [scenario]);
+  }, [base]);
 
-  // Drop the old area's result when the area changes.
+  // Live weather: on ZIP change, then every 10 minutes.
+  useEffect(() => {
+    setLive(null);
+    if (!zip) return;
+    const ctrl = new AbortController();
+    const load = () =>
+      getWeather(zip, ctrl.signal)
+        .then(setLive)
+        .catch(() => {
+          /* keep the last reading; the app falls back to manual storm strength */
+        });
+    load();
+    const timer = setInterval(load, WEATHER_REFRESH_MS);
+    return () => {
+      ctrl.abort();
+      clearInterval(timer);
+    };
+  }, [zip]);
+
+  // New ZIP: drop the old estimate.
   useEffect(() => {
     setData(null);
     setSavedAt(null);
     setError(null);
   }, [locationId]);
 
+  // Estimate: re-call /assess whenever the ZIP or scenario changes (debounced).
   useEffect(() => {
     if (!locationId) return;
     const ctrl = new AbortController();
@@ -136,25 +163,22 @@ export function AssessmentProvider({ children }: { children: ReactNode }) {
           setData(d);
           setSavedAt(null);
           setError(null);
-          saveEstimate(locationId, d);
+          saveLastEstimate(locationId, d);
         })
         .catch((e: unknown) => {
           if (ctrl.signal.aborted) return;
           if (e instanceof ApiError && e.status === 404) {
-            clearLocation(); // saved area no longer exists on the server
+            clearLocation(); // this ZIP is no longer served
             return;
           }
           setError("Couldn't reach the outage service. Check your connection.");
-          // Offline: fall back to the last estimate saved on this device.
-          const saved = loadSavedEstimate(locationId);
+          const saved = loadLastEstimate(locationId); // offline: show the last estimate we saved
           if (saved) {
             setData((cur) => cur ?? saved.data);
             setSavedAt(saved.savedAt);
           }
         })
-        .finally(() => {
-          if (!ctrl.signal.aborted) setLoading(false);
-        });
+        .finally(() => !ctrl.signal.aborted && setLoading(false));
     }, DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
@@ -162,18 +186,20 @@ export function AssessmentProvider({ children }: { children: ReactNode }) {
     };
   }, [locationId, scenario, attempt, clearLocation]);
 
-  const updateScenario = useCallback(
-    (patch: Partial<Scenario>) => setScenario((s) => ({ ...s, ...patch })),
-    [],
-  );
-  const resetScenario = useCallback(() => setScenario(DEFAULT_SCENARIO), []);
+  const updateScenario = useCallback((patch: Partial<Scenario>) => {
+    if (patch.storm_severity !== undefined) setUseLive(false); // choosing a strength = simulating
+    setBase((s) => ({ ...s, ...patch }));
+  }, []);
+  const resetScenario = useCallback(() => {
+    setBase(DEFAULT_SCENARIO);
+    setUseLive(true);
+  }, []);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   const value = useMemo<AssessmentContextValue>(
-    () => ({ scenario, updateScenario, resetScenario, data, savedAt, loading, error, retry }),
-    [scenario, updateScenario, resetScenario, data, savedAt, loading, error, retry],
+    () => ({ scenario, updateScenario, resetScenario, live, useLive, setUseLive, data, savedAt, loading, error, retry }),
+    [scenario, updateScenario, resetScenario, live, useLive, data, savedAt, loading, error, retry],
   );
-
   return <AssessmentContext.Provider value={value}>{children}</AssessmentContext.Provider>;
 }
 
@@ -185,28 +211,23 @@ export function useAssessment(): AssessmentContextValue {
 
 // ---- Display helpers shared by screens ----------------------------------------
 
-const BAND_LABEL = { low: "Low", medium: "Medium", high: "High" } as const;
-export const bandLabel = (b: keyof typeof BAND_LABEL) => BAND_LABEL[b];
-
-// "33–129 hours" or, for long outages, "1.4–5.4 days"
-export function formatRange(lo: number, hi: number): string {
-  if (hi >= 48) return `${fmt(lo / 24)}–${fmt(hi / 24)} days`;
-  return `${fmt(lo)}–${fmt(hi)} hours`;
-}
-
-export function formatHours(h: number): string {
-  if (h >= 48) return `about ${fmt(h / 24)} days`;
-  return `about ${fmt(h)} hours`;
-}
+export const bandLabel = (b: "low" | "medium" | "high") => ({ low: "Low", medium: "Medium", high: "High" })[b];
 
 function fmt(x: number): string {
   return x >= 10 ? String(Math.round(x)) : String(Math.round(x * 10) / 10);
 }
 
-// "R2: declared medical equipment ..." -> "declared medical equipment ..."
-export function plainRule(rule: string): string {
-  return rule.replace(/^R\d+:\s*/, "");
+// "33–129 hours" or, for long outages, "1.4–5.4 days"
+export function formatRange(lo: number, hi: number): string {
+  return hi >= 48 ? `${fmt(lo / 24)}–${fmt(hi / 24)} days` : `${fmt(lo)}–${fmt(hi)} hours`;
 }
+
+export function formatHours(h: number): string {
+  return h >= 48 ? `about ${fmt(h / 24)} days` : `about ${fmt(h)} hours`;
+}
+
+// "R2: declared medical equipment ..." -> "declared medical equipment ..."
+export const plainRule = (rule: string) => rule.replace(/^R\d+:\s*/, "");
 
 export const CHANNEL_LABEL: Record<string, string> = {
   sms: "Text message",

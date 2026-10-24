@@ -90,7 +90,7 @@ function loadPush(): boolean {
 
 export default function Alerts() {
   const { location } = useLocation();
-  const { scenario, data, error } = useAssessment();
+  const { scenario, data, error, live } = useAssessment();
   const [open, setOpen] = useState(true);
   const [pushEnabled, setPushEnabled] = useState(loadPush);
 
@@ -165,12 +165,32 @@ export default function Alerts() {
         <div>
           <h1>Alerts</h1>
           <p>
-            {alert ? "1 active" : "None active"} for {location?.label}
+            {alert ? "Outage alert on" : "No outage alert"} for {location?.label}
           </p>
         </div>
       </header>
 
       <div className="stack">
+        {/* Real weather alerts from the National Weather Service */}
+        <section className="card" aria-label="Weather alerts">
+          <span className="eyebrow">Weather alerts · National Weather Service</span>
+          {live?.alerts == null ? (
+            <p className="dim nws__empty">{live ? "We couldn't check weather alerts right now." : "Checking…"}</p>
+          ) : live.alerts.length === 0 ? (
+            <p className="dim nws__empty">No active weather alerts for your area.</p>
+          ) : (
+            <ul className="nws">
+              {live.alerts.map((a) => (
+                <li key={a.headline}>
+                  <strong>{a.event}</strong>
+                  <span>{a.headline}</span>
+                  {a.instruction && <small>{a.instruction}</small>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
         {alert ? (
           <AlertCard alert={alert} open={open} onToggle={() => setOpen((v) => !v)} />
         ) : (

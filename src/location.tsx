@@ -6,23 +6,26 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { LocationSuggestion, UserLocation } from "./types";
+import type { ZipResponse } from "./api/contract";
 
 // ============================================================================
-// The user's chosen area, shared by every screen.
+// The customer's ZIP code, shared by every screen. A ZIP is the only thing we
+// ask for. It is saved on this device only (localStorage), never as an account.
 //
 //   const { location, openPicker } = useLocation();
-//
-// - `location` is null until the user picks an area (from GET /locations).
-// - The choice is remembered in the browser (localStorage) between visits.
-// - `pickerOpen` / `openPicker()` let any screen open the area picker.
 // ============================================================================
 
-const STORAGE_KEY = "storm-watch:area";
+const STORAGE_KEY = "storm-watch:zip";
+
+export interface UserLocation {
+  zip: string; // "24014"
+  label: string; // "ZIP 24014 · Roanoke"
+  locationId: string; // "ZIP-24014"
+}
 
 interface LocationContextValue {
   location: UserLocation | null;
-  setFromSuggestion: (s: LocationSuggestion) => void;
+  setFromZip: (z: ZipResponse) => void;
   clearLocation: () => void;
   pickerOpen: boolean;
   openPicker: () => void;
@@ -31,20 +34,13 @@ interface LocationContextValue {
 
 const LocationContext = createContext<LocationContextValue | null>(null);
 
-// ---- Browser storage (wrapped: private windows / blocked storage can throw) ----
-
-function isValidLocation(value: unknown): value is UserLocation {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  return typeof v.label === "string" && typeof v.locationId === "string";
-}
-
 function loadSaved(): UserLocation | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    return isValidLocation(parsed) ? { ...parsed, source: "saved" } : null;
+    const v: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
+    const o = v as Record<string, unknown> | null;
+    return o && typeof o.zip === "string" && typeof o.label === "string" && typeof o.locationId === "string"
+      ? (o as unknown as UserLocation)
+      : null;
   } catch {
     return null;
   }
@@ -59,44 +55,38 @@ function persist(location: UserLocation | null) {
   }
 }
 
-// ---- Provider ------------------------------------------------------------------
-
 export function LocationProvider({ children }: { children: ReactNode }) {
-  const [location, setLocationState] = useState<UserLocation | null>(loadSaved);
-  // First-time visitors with no saved area see the picker right away.
+  const [location, setLocation] = useState<UserLocation | null>(loadSaved);
+  // First-time visitors with no saved ZIP see the picker right away.
   const [pickerOpen, setPickerOpen] = useState(() => loadSaved() === null);
 
-  const setFromSuggestion = useCallback((s: LocationSuggestion) => {
-    const next: UserLocation = { label: s.label, locationId: s.id, source: "search" };
-    setLocationState(next);
+  const setFromZip = useCallback((z: ZipResponse) => {
+    const next = { zip: z.zip, label: z.label, locationId: z.location_id };
+    setLocation(next);
     persist(next);
     setPickerOpen(false);
   }, []);
 
   const clearLocation = useCallback(() => {
-    setLocationState(null);
+    setLocation(null);
     persist(null);
     setPickerOpen(true);
   }, []);
 
   const openPicker = useCallback(() => setPickerOpen(true), []);
   const closePicker = useCallback(() => {
-    // Can't dismiss the picker until an area has been chosen.
-    if (location) setPickerOpen(false);
+    if (location) setPickerOpen(false); // can't dismiss until a ZIP is set
   }, [location]);
 
-  const value = useMemo<LocationContextValue>(
-    () => ({ location, setFromSuggestion, clearLocation, pickerOpen, openPicker, closePicker }),
-    [location, setFromSuggestion, clearLocation, pickerOpen, openPicker, closePicker],
+  const value = useMemo(
+    () => ({ location, setFromZip, clearLocation, pickerOpen, openPicker, closePicker }),
+    [location, setFromZip, clearLocation, pickerOpen, openPicker, closePicker],
   );
-
   return <LocationContext.Provider value={value}>{children}</LocationContext.Provider>;
 }
 
 export function useLocation(): LocationContextValue {
   const ctx = useContext(LocationContext);
-  if (!ctx) {
-    throw new Error("useLocation must be used inside <LocationProvider>");
-  }
+  if (!ctx) throw new Error("useLocation must be used inside <LocationProvider>");
   return ctx;
 }

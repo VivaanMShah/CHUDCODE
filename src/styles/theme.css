@@ -5,27 +5,27 @@
 
 :root {
   /* Surfaces */
-  --bg-0: #070c16;
-  --bg-1: #0b1220;
+  --bg-0: #0a1018;
+  --bg-1: #0f1722;
   --bg-2: #101a2c;
-  --card: rgba(255, 255, 255, 0.035);
+  --card: rgba(255, 255, 255, 0.045);
   --card-solid: #111b2e;
-  --border: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.07);
   --border-strong: rgba(255, 255, 255, 0.16);
 
   /* Text */
   --text: #f1f5fb;
-  --text-dim: #aab6c8;
+  --text-dim: #b4bfce;
   --text-faint: #6f7d93;
 
   /* Accents */
-  --blue: #4c8dff;
-  --blue-soft: rgba(76, 141, 255, 0.16);
-  --yellow: #f5b83d;
-  --orange: #f08a3c;
-  --red: #ef4b4b;
-  --red-soft: rgba(239, 75, 75, 0.14);
-  --green: #3ccf91;
+  --blue: #7aa7e8;
+  --blue-soft: rgba(122, 167, 232, 0.16);
+  --yellow: #e6c46d;
+  --orange: #e39a64;
+  --red: #e07f7f;
+  --red-soft: rgba(224, 127, 127, 0.14);
+  --green: #6fcf9f;
 
   /* Severity colors (used by alerts / badges) */
   --warning: var(--red);
@@ -39,7 +39,7 @@
   /* Shape */
   --radius-sm: 8px;
   --radius-md: 14px;
-  --radius-lg: 18px;
+  --radius-lg: 20px;
 
   /* Layout */
   --app-width: 420px;
@@ -104,8 +104,8 @@ input:focus-visible {
   margin: 0 auto;
   overflow: hidden;
   background:
-    radial-gradient(120% 40% at 50% 100%, rgba(150, 50, 60, 0.22), transparent 70%),
-    radial-gradient(90% 30% at 20% 0%, rgba(76, 141, 255, 0.08), transparent 70%),
+    radial-gradient(120% 40% at 50% 100%, rgba(70, 110, 140, 0.16), transparent 70%),
+    radial-gradient(90% 30% at 20% 0%, rgba(122, 167, 232, 0.07), transparent 70%),
     linear-gradient(180deg, var(--bg-1), var(--bg-0));
 }
 
@@ -134,19 +134,19 @@ input:focus-visible {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 14px;
+  padding: 18px;
 }
 
 .stack {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
 .eyebrow {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-dim);
 }
@@ -195,18 +195,18 @@ input:focus-visible {
   text-transform: uppercase;
 }
 .badge--warning {
-  color: #ff7a6b;
-  background: rgba(239, 75, 75, 0.1);
+  color: #eb9a9a;
+  background: rgba(224, 127, 127, 0.1);
 }
 .badge--watch {
   color: var(--orange);
 }
 .badge--advisory {
-  color: #7fb0ff;
+  color: #9cc0f2;
 }
 .badge--high {
-  color: #ff7a6b;
-  background: rgba(239, 75, 75, 0.1);
+  color: #eb9a9a;
+  background: rgba(224, 127, 127, 0.1);
   font-family: var(--font-sans);
   letter-spacing: 0;
   text-transform: none;

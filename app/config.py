@@ -59,7 +59,7 @@ CREW_AVAILABILITY = 0.85  # chance each assigned crew is actually working at a g
 
 # Storm severity scale. The largest storm in ARCOS history (Feb 2025) is treated as severity 4.
 REFERENCE_SEVERITY = 4
-SEVERITY_LOGIT_STEP = 1.0  # risk log-odds change per severity level
+SEVERITY_LOGIT_STEP = 1.6  # risk log-odds change per severity level (assumed, not fitted)
 SEVERITY_DAMAGE_MULT = {1: 0.05, 2: 0.2, 3: 0.5, 4: 1.0, 5: 1.8}
 
 RISK_BANDS = [(0.35, "low"), (0.65, "medium"), (1.01, "high")]

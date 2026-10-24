@@ -53,7 +53,9 @@ docker build -t outage-concierge . && docker run -p 8000:8000 outage-concierge
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/health` | Health check, shows `data_mode`, loaded files, backtest AUC |
-| GET | `/locations` | Anonymized locations the user can pick |
+| GET | `/zip/{zip}` | Turn a 5-digit ZIP into an area id (`ZIP-24014`). No coordinates returned |
+| GET | `/weather/{zip}` | Live storm strength 1-5, next 12 hours, National Weather Service alerts |
+| GET | `/locations` | Anonymized circuit-level areas (`LOC-001`...). The app now uses ZIPs instead |
 | POST | `/assess` | Risk, restoration range, actions, alerts |
 | POST | `/message` | Customer message for a given stage |
 
@@ -77,6 +79,38 @@ Errors: unknown `location_id` → `404`. Invalid input (for example `storm_sever
 ```
 
 104 locations. Each one is a neighborhood-sized area (one distribution circuit with at least 50 customers). Labels use the city name plus a number, never internal circuit or station codes. `has_storm_history: false` areas return a fallback from `/assess`, which is useful for demoing the fallback state.
+
+## ZIP search and live weather
+
+**ZIP is the only thing a customer enters.** It is saved on their device and never sent anywhere except this API.
+
+- `GET /zip/24014` → `{zip, location_id: "ZIP-24014", label, city, customers_served_band}`. 404 if we have no data for the ZIP, 422 if it isn't 5 digits.
+- Use `location_id` (`ZIP-24014`) anywhere `LOC-001` worked: `/assess`, `/message`. A ZIP is served by several circuits, so the engine uses a customer-weighted "typical circuit" for it, and `meta.limits` says so.
+- ZIP centers are an offline CSV (`app/zip_centers.csv`, built once by `python -m scripts.build_zip_table`), so a typed ZIP is never sent to a third party. Customers are matched to the nearest ZIP center, so ZIP borders are approximate.
+- `GET /weather/24014` → `severity` (1-5), `severity_label`, `chance_pct`, `reasons`, `hourly` (next 12 hours: rain, gusts, wind direction), `alerts` (National Weather Service; `null` = could not check), `fallback`. Only the ZIP's public center point goes to Open-Meteo and NWS. Cached 10 minutes.
+- The app uses `severity` as the default `storm_severity` ("live mode"). The "Try a storm" panel overrides it ("simulate mode"), which keeps demos repeatable on a sunny day.
+
+### Weather model card
+
+| | |
+|---|---|
+| Question | Will today be a *damage day* (the utility logs storm damage)? |
+| Model | Logistic regression on 5 features: gust, 2-day max gust, rain today, rain yesterday, 3-day rain |
+| Data | 1,425 days (Sep 2022 to Aug 2026), 55 damage days. Weather is from archived forecasts, so training matches what the live forecast looks like |
+| Validation | Time-ordered expanding window, 6 folds, 5-day gap, scaler and model fit inside each window |
+| Result | Out-of-time AUC **0.73**; Brier 0.044 vs 0.047 for always guessing the base rate. A modest signal |
+| Severity | Chance of a damage day: <5% = 1 Calm, 5-12% = 2, 12-30% = 3, 30-55% = 4, 55%+ = 5 |
+| Not used | Repair dates, repair status, or any after-the-fact field |
+| Caveats | Only 55 positive days and one dominant storm. Reports lag the weather by about a day. We tried a few feature sets on the same folds, so the score is slightly optimistic. Tree models did worse with this little data |
+
+Retrain with `python -m app.train_weather` (needs internet). It writes `app/weather_model.json`.
+
+### Privacy notes
+
+- No names, addresses, coordinates, or customer ids in any response. Customer points are used once at startup to match ZIPs, then dropped.
+- The audit log keeps only the first 3 digits of a ZIP (`ZIP-240xx`).
+- uvicorn's access log records request paths (which include the ZIP). Turn it off or shorten it in production (`--no-access-log`).
+- Radar "Find a hospital" opens Google Maps with the ZIP. It is a link the customer taps, not data we send. Real hospital names, numbers, and locations from the provided data are never returned (hard rule 5).
 
 ## Scenario input (shared by /assess and /message)
 
@@ -249,19 +283,19 @@ Ranges over 48 hours are written in days ("about 4 to 17 days"). When `meta.fall
 
 ## Frontend notes
 
-The React app in `src/` is wired to this API:
+React app in `src/`, wired to this API:
 
-| Screen | Backend data |
+| Screen | What it does |
 |---|---|
-| Area picker | `GET /locations` (search by label; no map, because hard rule 5 forbids returning coordinates) |
-| Home | Scenario sliders → `POST /assess` (300 ms debounce): risk band + confidence + reasons, range bar + histogram, tappable what-if chips (apply `scenario_patch`), upstream chain, utility records, gray fallback card, "About this estimate" with backtest and responsible-AI checklist |
-| Alerts | Alert rule + escalation, and a 4-stage storm timeline from `POST /message` with a "Verified numbers" check |
-| Prepare | `customer_actions.actions` checklist, safety messages, "Report a downed line" (safety text only, demo) |
-| Radar, Chat | Design sample data, labeled "Sample data". Not connected |
+| ZIP picker | Types a ZIP, `GET /zip/{zip}` on the 5th digit |
+| Home | One hero card: live weather, outage risk, restoration range with histogram, what-if chips. "Try a storm" panel for the simulator. Collapsible details: why, upstream chain, utility records, About |
+| Radar | Forecast illustration drawn from the hourly forecast (not real radar imagery): play and scrub 12 hours, Rain and Wind layers, tap a spot for conditions, and a "Need help?" panel (911, the power company, find a hospital, find a shelter) |
+| Alerts | Real NWS alerts, the outage alert rule and escalation, and the 4-stage message timeline with "Verified numbers" |
+| Prepare | Checklist, safety messages, downed-line guidance (demo, no reporting) |
+| Chat | Sample replies only. Reserved for the Bedrock chatbot |
 
-- The API layer is `src/api/backend.ts` (calls), `src/api/contract.ts` (types mirroring `app/models.py`), and `src/api/samples.ts` (sample-only screens).
-- The last good estimate is saved on the device and shown with an "offline" note if the backend can't be reached.
-- If `meta.fallback` is true, the app shows the gray fallback card and mutes the estimate cards.
+- API layer: `src/api/backend.ts`, types in `src/api/contract.ts`, contact numbers in `src/config.ts` (the power company line is the Appalachian Power Virginia outage number).
+- The last estimate is saved on the device and shown with an offline note if the backend is unreachable.
 
 ## Project layout
 
@@ -280,6 +314,8 @@ app/
   engine.py       request orchestration
 tests/
   smoke_test.py   mild vs severe on every endpoint, plus the newer optional fields
+app/weather.py, train_weather.py, zip_centers.csv, weather_model.json   live weather model
+scripts/          one-off builders (ZIP table)
 src/              React + Vite frontend
   api/            backend client, contract types, sample data
   assessment.tsx  shared scenario + /assess state (with offline copy)
@@ -289,13 +325,12 @@ src/              React + Vite frontend
 
 ## Roadmap
 
-Done: data loader, resolver, risk engine with held-out backtest, Monte Carlo restoration with histogram and what-ifs, upstream chain, rules engine with opt-in needs and backup hours, message generator with number validator, safety layer, critical-facility flag, connected frontend.
+Done: ZIP search, weather-driven storm strength, calmer UI, interactive forecast radar with help actions, NWS alerts.
 
-Not done:
-1. Load the STORMS and indirect-labor files when available (replace placeholders in `config.py`)
-2. Map with area pins: needs coordinates, which hard rule 5 forbids. The picker uses a searchable list instead
-3. Backtest of the restoration *range* against actual repair times (ARCOS dates are day-level and crew counts aren't recorded)
-4. Storm replay mode, Spanish toggle, large-text mode, chat
+Next:
+1. **Bedrock chatbot** (`POST /chat`): the model only rewords text from the `/assess` JSON, and the number validator checks every number. Use the Bedrock Converse API with a model id from an env var.
+2. **AWS hosting:** the API needs `data/` at runtime (about 500 MB, gitignored), so bake it into the container image or mount it from S3. Set `VITE_API_URL` for the frontend build, and tighten CORS from `*` to the frontend's origin.
+3. Load the STORMS and indirect-labor files when available (replace placeholders in `app/config.py`).
 
 ## Built during HackOHI/O 2026
 

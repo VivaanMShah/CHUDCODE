@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AssessmentProvider, useAssessment } from "./assessment";
 import BottomNav from "./components/BottomNav";
-import LocationPicker from "./components/LocationPicker";
+import ZipPicker from "./components/ZipPicker";
 import { LocationProvider } from "./location";
 import Alerts from "./screens/Alerts";
 import Chat from "./screens/Chat";
@@ -14,12 +14,12 @@ import type { TabId } from "./types";
 // scenario, and backend assessment.
 function AppShell() {
   const [tab, setTab] = useState<TabId>("home");
-  const { data } = useAssessment();
-  const alertCount = data?.model_estimate.alert_eligible ? 1 : 0;
+  const { data, live } = useAssessment();
+  const alertCount = (live?.alerts?.length ?? 0) + (data?.model_estimate.alert_eligible ? 1 : 0);
 
   return (
     <div className="app">
-      {tab === "home" && <Home onOpenAlerts={() => setTab("alerts")} />}
+      {tab === "home" && <Home onOpenAlerts={() => setTab("alerts")} onOpenPrepare={() => setTab("storm")} />}
       {tab === "radar" && <Radar />}
       {tab === "alerts" && <Alerts />}
       {tab === "storm" && <Storm />}
@@ -28,7 +28,7 @@ function AppShell() {
       <BottomNav active={tab} onChange={setTab} alertCount={alertCount} />
 
       {/* Opens by itself on a first visit; any screen can reopen it. */}
-      <LocationPicker />
+      <ZipPicker />
     </div>
   );
 }

@@ -7,10 +7,11 @@
 
 import type {
   AssessResponse,
-  LocationsResponse,
   MessageResponse,
   MessageType,
   Scenario,
+  WeatherResponse,
+  ZipResponse,
 } from "./contract";
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/$/, "");
@@ -35,17 +36,14 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-// The area list never changes while the server runs, so fetch it once.
-let locationsCache: Promise<LocationsResponse> | null = null;
+// ZIP search: the only thing a customer types. Returns an area id, never coordinates.
+export function lookupZip(zip: string, signal?: AbortSignal): Promise<ZipResponse> {
+  return call<ZipResponse>(`/zip/${encodeURIComponent(zip)}`, { signal });
+}
 
-export function getLocations(): Promise<LocationsResponse> {
-  if (!locationsCache) {
-    locationsCache = call<LocationsResponse>("/locations").catch((e) => {
-      locationsCache = null; // allow a retry after a failure
-      throw e;
-    });
-  }
-  return locationsCache;
+// Live storm strength (1–5), next 12 hours, and National Weather Service alerts.
+export function getWeather(zip: string, signal?: AbortSignal): Promise<WeatherResponse> {
+  return call<WeatherResponse>(`/weather/${encodeURIComponent(zip)}`, { signal });
 }
 
 export function assess(

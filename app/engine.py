@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 
 from . import config as C
@@ -67,7 +68,7 @@ def _assumptions(state: State, scenario) -> list[str]:
         out.append("Risk model unavailable; risk uses a neutral baseline adjusted for storm severity.")
     out += [
         f"Storm severity {C.REFERENCE_SEVERITY} is calibrated to the {ref_label}, the largest in the "
-        "utility's damage records. Each level up or down changes the odds of an outage about 2.7 times.",
+        f"utility's damage records. Each level up or down changes the odds of an outage about {math.exp(C.SEVERITY_LOGIT_STEP):.0f} times (an assumption, not fitted to data).",
         f"Expected damage blends this area's damage in the {ref_label} with the system average per mile of line.",
         f"Labor hours per repair are placeholders until the STORMS file is provided: pole {h['pole']}, "
         f"primary wire {h['primary_wire']}, transformer {h['transformer']}, fuse or switch {h['fuse_switch']} crew-hours.",
