@@ -1,34 +1,68 @@
-import type { WeatherResponse } from "../api/contract";
+import { useAssessment } from "../assessment";
 
-// What kind of storm is coming and when it starts. Comes from the live forecast and official alerts.
-const ICON: Record<string, string> = {
-  hurricane: "🌀", tornado: "🌪️", thunderstorm: "⛈️", winter: "❄️", flood: "🌊", wind: "💨", rain: "🌧️", none: "☀️",
-};
+// What kind of storm is coming, when it starts, and roughly how far away it is.
+// Live: from the forecast and official alerts. Simulating: from the storm the customer made up.
 
-export function StormArrival({ live }: { live: WeatherResponse | null }) {
-  if (!live || live.storm_type == null) {
+export const STORM_OPTIONS: { value: string; label: string; icon: string }[] = [
+  { value: "hurricane", label: "Hurricane or tropical storm", icon: "🌀" },
+  { value: "tornado", label: "Tornado", icon: "🌪️" },
+  { value: "thunderstorm", label: "Thunderstorm", icon: "⛈️" },
+  { value: "winter", label: "Winter storm (snow or ice)", icon: "❄️" },
+  { value: "flood", label: "Flooding rain", icon: "🌊" },
+  { value: "wind", label: "High wind", icon: "💨" },
+  { value: "rain", label: "Heavy rain", icon: "🌧️" },
+  { value: "none", label: "No storm expected", icon: "☀️" },
+];
+
+// Storms usually travel at about this speed. Used only to turn "hours away" into "miles away".
+const STORM_MPH = 25;
+
+export function StormArrival() {
+  const { live, useLive, liveAvailable, sim } = useAssessment();
+
+  // Pick the storm to describe: the made-up one, or the real forecast.
+  let type: string | null | undefined;
+  let hours: number | null | undefined;
+  if (!useLive) {
+    type = sim.stormType;
+    hours = sim.arrivalHours;
+  } else {
+    type = live?.storm_type;
+    hours = live?.arrival_hours;
+  }
+
+  if (type == null) {
+    const note = live ? live.fallback_reason ?? "Live weather is unavailable right now." : "Checking the forecast…";
     return (
       <section className="card" aria-label="Storm arrival">
         <span className="eyebrow">Storm arrival</span>
-        <p className="dim">{live ? live.fallback_reason ?? "Live weather is unavailable right now." : "Checking the forecast…"}</p>
+        <p className="dim">{note}</p>
       </section>
     );
   }
-  const none = live.storm_type === "none";
-  const hours = live.arrival_hours;
-  const when = none || hours == null ? "None in the next 48 hours" : hours <= 0 ? "Here now" : `In about ${hours} hour${hours === 1 ? "" : "s"}`;
+
+  const option = STORM_OPTIONS.find((o) => o.value === type) ?? STORM_OPTIONS[2];
+  const noStorm = type === "none" || hours == null;
+  const hoursAway = hours ?? 0;
+  const when = noStorm ? "None in the next 48 hours" : hoursAway <= 0 ? "Here now" : `In about ${hoursAway} hour${hoursAway === 1 ? "" : "s"}`;
+  const away = noStorm ? null : hoursAway <= 0 ? "The storm is overhead." : `About ${Math.round(hoursAway * STORM_MPH)} miles away.`;
+
   return (
     <section className="card arrival" aria-label="Storm arrival">
-      <span className="eyebrow">Storm arrival</span>
+      <span className="eyebrow">Storm arrival{useLive ? "" : " · simulated"}</span>
       <div className="arrival__row">
-        <span className="arrival__icon" aria-hidden>{ICON[live.storm_type] ?? "⛈️"}</span>
+        <span className="arrival__icon" aria-hidden>{option.icon}</span>
         <div>
-          <strong className="arrival__type">{live.storm_type_label}</strong>
+          <strong className="arrival__type">{option.label}</strong>
           <div className="arrival__when">{when}</div>
         </div>
       </div>
-      {!none && live.severity_label && <p className="dim">Strength: {live.severity_label}. {live.arrival_text}</p>}
-      <small className="dim">Turn on phone alerts below and we'll send a notification about 5 hours before a storm arrives.</small>
+      {away && (
+        <p className="dim">
+          {away} <small>(A rough guess: storms usually move about {STORM_MPH} mph.)</small>
+        </p>
+      )}
+      {!useLive && liveAvailable && <small className="dim">Live weather is off while you simulate.</small>}
     </section>
   );
 }

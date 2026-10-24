@@ -43,7 +43,7 @@ function timeNow(): string {
 
 export default function Chat() {
   const { location } = useLocation();
-  const { scenario } = useAssessment();
+  const { scenario, useLive } = useAssessment();
 
   const [messages, setMessages] = useState<ChatMessage[]>(loadHistory);
   const [suggestions, setSuggestions] = useState<string[]>(STARTER_QUESTIONS);
@@ -94,7 +94,7 @@ export default function Chat() {
         .filter((m) => m.id !== "welcome")
         .slice(-6)
         .map((m) => ({ role: m.role, text: m.text.slice(0, 400) }));
-      const reply = await askConcierge(location.locationId, scenario, question, earlier);
+      const reply = await askConcierge(location.locationId, scenario, question, earlier, useLive);
       setMessages((m) => [
         ...m,
         { id: nextId(), role: "assistant", text: reply.answer, sentAt: timeNow(), checked: reply.source === "model" && reply.validated },

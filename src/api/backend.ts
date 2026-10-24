@@ -53,11 +53,12 @@ export function askConcierge(
   scenario: Scenario,
   question: string,
   history: { role: "user" | "assistant"; text: string }[] = [],
+  useLiveWeather = true,
   signal?: AbortSignal,
 ): Promise<ChatResponse> {
   return call<ChatResponse>("/chat", {
     method: "POST",
-    body: JSON.stringify({ location_id: locationId, question, scenario, history }),
+    body: JSON.stringify({ location_id: locationId, question, scenario, history, use_live_weather: useLiveWeather }),
     signal,
   });
 }

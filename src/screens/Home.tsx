@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Band } from "../api/contract";
 import AboutEstimate from "../components/AboutEstimate";
 import RangeBar from "../components/RangeBar";
+import { STORM_OPTIONS, StormArrival } from "../components/StormArrival";
 import {
   SEVERITY_LABEL,
   bandLabel,
@@ -36,7 +37,7 @@ function fmtPct(p: number): string {
 
 export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
   const { location, openPicker } = useLocation();
-  const { scenario, updateScenario, resetScenario, live, useLive, setUseLive, data, quiet, savedAt, loading, error, retry } =
+  const { scenario, updateScenario, resetScenario, live, liveAvailable, useLive, setUseLive, sim, setSim, data, quiet, savedAt, loading, error, retry } =
     useAssessment();
   const [simulating, setSimulating] = useState(false);
 
@@ -44,7 +45,7 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
   const meta = data?.meta;
   const range = est?.restoration_range;
   const chain = data?.area?.upstream_chain ?? [];
-  const liveOk = !!live && live.severity !== null;
+  const liveOk = liveAvailable;
   const weatherAlerts = live?.alerts ?? [];
 
   const { profile, isEmpty, openSheet, promptDismissed, dismissPrompt } = useProfile();
@@ -194,6 +195,8 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
           </>
         )}
 
+        <StormArrival />
+
         {/* Try a storm */}
         <section className="card simulate">
           <button type="button" className="simulate__toggle" aria-expanded={simulating}
@@ -224,8 +227,23 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
                 {liveOk && !useLive && (
                   <button type="button" className="link" onClick={() => setUseLive(true)}>Back to live weather</button>
                 )}
-                {useLive && <small className="dim">Showing live weather. Tap a number to simulate.</small>}
+                {useLive
+                  ? <small className="dim">Showing live weather. Change anything here to simulate.</small>
+                  : <small className="dim">Simulating. Live weather is off.</small>}
               </div>
+
+              <label className="scenario__row">
+                <div className="scenario__label"><span>Type of storm</span></div>
+                <select value={sim.stormType} onChange={(e) => setSim({ stormType: e.target.value })}>
+                  {STORM_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </label>
+
+              <label className="scenario__row">
+                <div className="scenario__label"><span>Storm arrives in</span><strong>{sim.arrivalHours} hours</strong></div>
+                <input type="range" min={0} max={48} value={sim.arrivalHours}
+                  onChange={(e) => setSim({ arrivalHours: Number(e.target.value) })} />
+              </label>
 
               <label className="scenario__row">
                 <div className="scenario__label"><span>Damaged poles</span><strong>{scenario.damaged_poles}</strong></div>

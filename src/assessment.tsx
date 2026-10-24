@@ -38,13 +38,24 @@ export const DEFAULT_SCENARIO: Scenario = {
   backup_hours: null,
 };
 
+// The storm the customer makes up while simulating. Strength and poles live in the scenario; these two
+// only change what we show (storm type, how far away it is) and are never sent to the backend.
+export interface Simulation {
+  stormType: string;
+  arrivalHours: number;
+}
+const DEFAULT_SIM: Simulation = { stormType: "thunderstorm", arrivalHours: 6 };
+
 interface AssessmentContextValue {
   scenario: Scenario; // what is sent to the backend (live severity already applied)
   updateScenario: (patch: Partial<Scenario>) => void;
   resetScenario: () => void;
-  live: WeatherResponse | null;
+  live: WeatherResponse | null; // null while simulating: live weather is fully off
+  liveAvailable: boolean; // the forecast could be read, so we can switch back to it
   useLive: boolean; // true = storm strength from live weather
   setUseLive: (on: boolean) => void;
+  sim: Simulation; // the made-up storm shown while simulating
+  setSim: (patch: Partial<Simulation>) => void;
   data: AssessResponse | null; // last good estimate (kept while a new one loads)
   quiet: boolean; // no storm: calm weather and low risk. Screens stop giving safety advice.
   savedAt: string | null; // set when showing a saved copy because the backend is unreachable
@@ -105,7 +116,8 @@ export function AssessmentProvider({ children }: { children: ReactNode }) {
 
   const [base, setBase] = useState<Scenario>(loadScenario);
   const [useLive, setUseLive] = useState(true);
-  const [live, setLive] = useState<WeatherResponse | null>(null);
+  const [forecast, setForecast] = useState<WeatherResponse | null>(null); // the real forecast
+  const [sim, setSimState] = useState<Simulation>(DEFAULT_SIM);
   const [data, setData] = useState<AssessResponse | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -113,7 +125,9 @@ export function AssessmentProvider({ children }: { children: ReactNode }) {
   const [attempt, setAttempt] = useState(0);
 
   // Live severity applies only in live mode and only when the weather model could score it.
-  const liveSeverity = useLive ? live?.severity ?? null : null;
+  const live = useLive ? forecast : null; // simulating = no live weather anywhere in the app
+  const liveAvailable = !!forecast && forecast.severity !== null;
+  const liveSeverity = live?.severity ?? null;
   const scenario = useMemo<Scenario>(
     () => (liveSeverity ? { ...base, storm_severity: liveSeverity } : base),
     [base, liveSeverity],
@@ -129,14 +143,16 @@ export function AssessmentProvider({ children }: { children: ReactNode }) {
     }
   }, [base]);
 
-  // Live weather: on ZIP change, then every 10 minutes.
+  // New ZIP: forget the old forecast.
+  useEffect(() => setForecast(null), [zip]);
+
+  // Live weather: on ZIP change, then every 10 minutes. Not at all while simulating.
   useEffect(() => {
-    setLive(null);
-    if (!zip) return;
+    if (!zip || !useLive) return;
     const ctrl = new AbortController();
     const load = () =>
       getWeather(zip, ctrl.signal)
-        .then(setLive)
+        .then(setForecast)
         .catch(() => {
           /* keep the last reading; the app falls back to manual storm strength */
         });
@@ -146,7 +162,7 @@ export function AssessmentProvider({ children }: { children: ReactNode }) {
       ctrl.abort();
       clearInterval(timer);
     };
-  }, [zip]);
+  }, [zip, useLive]);
 
   // New ZIP: drop the old estimate.
   useEffect(() => {
@@ -196,13 +212,18 @@ export function AssessmentProvider({ children }: { children: ReactNode }) {
   const resetScenario = useCallback(() => {
     // Keep the person's declared needs: they come from About you, not the simulator.
     setBase((b) => ({ ...DEFAULT_SCENARIO, declared_needs: b.declared_needs, backup_hours: b.backup_hours }));
+    setSimState(DEFAULT_SIM);
     setUseLive(true);
+  }, []);
+  const setSim = useCallback((patch: Partial<Simulation>) => {
+    setUseLive(false); // changing the made-up storm means simulating
+    setSimState((s) => ({ ...s, ...patch }));
   }, []);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   const value = useMemo<AssessmentContextValue>(
-    () => ({ scenario, updateScenario, resetScenario, live, useLive, setUseLive, data, quiet, savedAt, loading, error, retry }),
-    [scenario, updateScenario, resetScenario, live, useLive, data, quiet, savedAt, loading, error, retry],
+    () => ({ scenario, updateScenario, resetScenario, live, liveAvailable, useLive, setUseLive, sim, setSim, data, quiet, savedAt, loading, error, retry }),
+    [scenario, updateScenario, resetScenario, live, liveAvailable, useLive, sim, setSim, data, quiet, savedAt, loading, error, retry],
   );
   return <AssessmentContext.Provider value={value}>{children}</AssessmentContext.Provider>;
 }

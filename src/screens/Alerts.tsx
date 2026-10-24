@@ -94,7 +94,7 @@ function loadPush(): boolean {
 
 export default function Alerts() {
   const { location } = useLocation();
-  const { scenario, data, error, live, quiet } = useAssessment();
+  const { scenario, data, error, live, useLive, quiet } = useAssessment();
   const { profile } = useProfile();
   const [open, setOpen] = useState(true);
   const [pushEnabled, setPushEnabled] = useState(loadPush);
@@ -176,14 +176,14 @@ export default function Alerts() {
       </header>
 
       <div className="stack">
-        <StormArrival live={live} />
+        <StormArrival />
         <PhoneAlerts />
 
         {/* Real weather alerts from the National Weather Service */}
         <section className="card" aria-label="Weather alerts">
           <span className="eyebrow">Weather alerts · National Weather Service</span>
           {live?.alerts == null ? (
-            <p className="dim nws__empty">{live ? "We couldn't check weather alerts right now." : "Checking…"}</p>
+            <p className="dim nws__empty">{!useLive ? "Live weather is off while you simulate a storm." : live ? "We couldn't check weather alerts right now." : "Checking…"}</p>
           ) : live.alerts.length === 0 ? (
             <p className="dim nws__empty">No active weather alerts for your area.</p>
           ) : (

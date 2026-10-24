@@ -197,6 +197,7 @@ class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=300)
     scenario: Scenario = Field(default_factory=Scenario)
     history: List[ChatTurn] = Field(default_factory=list, max_length=6)  # recent turns, for follow-ups
+    use_live_weather: bool = True  # false while the customer is simulating a storm
 
 
 class ChatResponse(BaseModel):

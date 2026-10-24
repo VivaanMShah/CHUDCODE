@@ -237,7 +237,8 @@ def chat_endpoint(req: ChatRequest, request: Request):
         raise HTTPException(429, "Too many questions. Please wait a minute and try again.")
     s = _state()
     loc = resolve(s.store, req.location_id)
-    wx = engines.live_weather(s.weather_model, loc.lat, loc.lon) if loc and loc.lat is not None else None
+    has_point = loc is not None and loc.lat is not None
+    wx = engines.live_weather(s.weather_model, loc.lat, loc.lon) if has_point and req.use_live_weather else None
     a = engines.assess(s, req.location_id, req.scenario, rid)
     if a is None:
         audit("/chat", rid, req.location_id, req.scenario, None, t0, 404)

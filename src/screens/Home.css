@@ -572,3 +572,5 @@
   width: max-content;
   margin-top: 6px;
 }
+
+.simulate select { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--line, #2a3342); background: transparent; color: inherit; font: inherit; }
