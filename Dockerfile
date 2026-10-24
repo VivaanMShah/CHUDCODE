@@ -8,6 +8,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY index.html tsconfig.json vite.config.ts ./
 COPY src ./src
+COPY public ./public
 RUN npm run build
 
 FROM public.ecr.aws/docker/library/python:3.14-slim

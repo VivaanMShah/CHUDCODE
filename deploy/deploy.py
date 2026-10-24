@@ -46,7 +46,7 @@ def make_zip() -> bytes:
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for f in TOP_FILES:
             z.write(ROOT / f, f)
-        for folder in ("app", "src"):
+        for folder in ("app", "src", "public"):
             for p in (ROOT / folder).rglob("*"):
                 rel = p.relative_to(ROOT).as_posix()
                 if not p.is_file() or SKIP & set(p.parts) or p.suffix == ".pyc" or rel == "src/main.py":
