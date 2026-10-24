@@ -29,6 +29,11 @@ const DEVICE_LABEL: Record<string, string> = {
   transformer: "Neighborhood transformer",
 };
 
+function fmtPct(p: number): string {
+  if (p < 0.01) return "under 1%";
+  return p < 0.1 ? `${(p * 100).toFixed(1)}%` : `${Math.round(p * 100)}%`;
+}
+
 export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
   const { location, openPicker } = useLocation();
   const { scenario, updateScenario, resetScenario, live, useLive, setUseLive, data, quiet, savedAt, loading, error, retry } =
@@ -124,7 +129,7 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
               <h1 className="hero__weather">{SEVERITY_LABEL[scenario.storm_severity]}</h1>
               <p className="hero__sub">
                 {useLive && liveOk && live?.reasons[0]
-                  ? `${live.reasons[0].text}${live.chance_pct !== null ? ` Chance of storm damage: ${live.chance_pct}%.` : ""}`
+                  ? `${live.reasons[0].text}${live.chance_pct !== null ? ` Chance of a damaging day: ${live.chance_pct}%.` : ""}`
                   : `Storm strength ${scenario.storm_severity} of 5.`}
               </p>
 
@@ -137,7 +142,11 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
                 </div>
                 <span className={`pill pill--${est.confidence}`}>{bandLabel(est.confidence)} confidence</span>
               </div>
-              {est.reasons[0] && <p className="hero__why">{est.reasons[0].text}</p>}
+              <p className="hero__why">
+                <strong>{fmtPct(est.risk_score)}</strong> chance of storm damage near you within about 2 days
+                {est.times_normal ? ` (${est.times_normal}x a normal day)` : ""}.
+                {est.similar_days != null ? ` Based on ${est.similar_days} similar days in the records.` : ""}
+              </p>
 
               <div className="hero__divider" />
               <span className="eyebrow">If the power goes out</span>
@@ -238,24 +247,6 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
                 <input type="range" min={0} max={60} value={scenario.damaged_poles}
                   onChange={(e) => updateScenario({ damaged_poles: Number(e.target.value) })} />
               </label>
-
-              <label className="scenario__row">
-                <div className="scenario__label"><span>Repair crews</span><strong>{scenario.crews}</strong></div>
-                <input type="range" min={1} max={20} value={scenario.crews}
-                  onChange={(e) => updateScenario({ crews: Number(e.target.value) })} />
-              </label>
-
-              <div className="scenario__row scenario__row--inline">
-                <div className="scenario__label">
-                  <span>Roads blocked</span>
-                  <small>{scenario.access_ok ? "Crews can reach the area" : "Crews will be slowed down"}</small>
-                </div>
-                <button type="button" role="switch" aria-checked={!scenario.access_ok} aria-label="Roads blocked"
-                  className={`switch${!scenario.access_ok ? " is-on" : ""}`}
-                  onClick={() => updateScenario({ access_ok: !scenario.access_ok })}>
-                  <span className="switch__thumb" />
-                </button>
-              </div>
 
               <p className="details__small dim">
                 Medical equipment, backup power, and other needs are set in{" "}

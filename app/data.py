@@ -80,26 +80,7 @@ MIN_CUSTOMERS_PER_ZIP = 100
 MC_SAMPLES = 2000
 MC_SEED = 42
 
-# Placeholder crew-hours per damage item, used until the STORMS labor-hour file is provided.
-PLACEHOLDER_LABOR_HOURS = {
-    "pole": 6.0,
-    "primary_wire": 2.5,
-    "secondary_wire": 1.5,
-    "transformer": 3.0,
-    "fuse_switch": 1.0,
-    "recloser": 3.0,
-    "other_equipment": 2.0,
-}
-PLACEHOLDER_TRAVEL_MULT = 1.25
-PLACEHOLDER_NONPRODUCTIVE_MULT = 1.15
-BLOCKED_ROADS_TRAVEL_MULT = 1.5
-CREW_AVAILABILITY = 0.85  # chance each assigned crew is actually working at a given time
-
-# Storm severity scale. The largest storm in ARCOS history (Feb 2025) is treated as severity 4.
-REFERENCE_SEVERITY = 4
-SEVERITY_LOGIT_STEP = 1.6  # risk log-odds change per severity level (assumed, not fitted)
-SEVERITY_DAMAGE_MULT = {1: 0.05, 2: 0.2, 3: 0.5, 4: 1.0, 5: 1.8}
-
+# The area-exposure model is backtested on the largest storm; these bands only sort that backtest.
 RISK_BANDS = [(0.35, "low"), (0.65, "medium"), (1.01, "high")]
 
 # Backup battery life we assume for home medical equipment when deciding escalation.
@@ -125,7 +106,7 @@ ARCOS_CLASS = {
     "switch": "fuse_switch",
     "recloser bank": "recloser",
 }
-DAMAGE_CLASSES = list(PLACEHOLDER_LABOR_HOURS.keys())
+DAMAGE_CLASSES = ["pole", "primary_wire", "secondary_wire", "transformer", "fuse_switch", "recloser", "other_equipment"]
 NON_WOOD = {"fiberglass", "steel", "concrete", "aluminum", "composite", "unknown", "other"}
 
 REQUIRED_COLUMNS = {

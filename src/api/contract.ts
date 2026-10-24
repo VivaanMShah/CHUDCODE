@@ -77,6 +77,8 @@ export interface ModelEstimate {
   alert_rule: string;
   restoration_histogram?: HistogramBin[] | null;
   simulations?: number | null;
+  similar_days?: number | null; // days in the records with a storm this strong
+  times_normal?: number | null; // risk compared with a normal day
 }
 
 export interface CustomerActions {

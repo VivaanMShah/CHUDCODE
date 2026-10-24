@@ -50,6 +50,7 @@ class RiskModel:
     coef: dict = field(default_factory=dict)
     means: dict = field(default_factory=dict)
     stds: dict = field(default_factory=dict)
+    ref_sorted: object = None  # every area's storm score, sorted: used to rank an area against the rest
 
     @property
     def ok(self) -> bool:
@@ -92,6 +93,7 @@ def train_risk(store: Store) -> RiskModel:
                           "rate": float(y[sel].mean()) if sel.any() else None}
     pipe.fit(X, y)
     m.pipe = pipe
+    m.ref_sorted = np.sort(pipe.predict_proba(X)[:, 1])
     scaler, lr = pipe.steps[0][1], pipe.steps[1][1]
     m.coef = dict(zip(RISK_FEATURES, lr.coef_[0]))
     m.means = dict(zip(RISK_FEATURES, scaler.mean_))
@@ -138,12 +140,11 @@ def _feature_text(name: str, f: dict, above: bool) -> str:
     return name
 
 
-def score_risk(model: RiskModel, feats: dict, scenario) -> dict:
-    """Return risk_score, band, reasons, and the model's backtest stats."""
-    sev = scenario.storm_severity
-    poles = scenario.damaged_poles
-    contribs = []  # (factor, contribution in log-odds, text)
+def area_score(model: RiskModel, feats: dict) -> dict:
+    """How exposed this area is compared with every other area (percentile 0 = least, 1 = most).
 
+    Built from the logistic model that was trained on the Feb 2025 storm. Used to rank areas."""
+    contribs = []  # (factor, push in log-odds, text)
     if model.ok:
         row = pd.DataFrame([{
             "log_primary_miles": np.log1p(feats.get("primary_miles") or np.nan),
@@ -153,26 +154,65 @@ def score_risk(model: RiskModel, feats: dict, scenario) -> dict:
         p_storm = float(model.pipe.predict_proba(row)[0, 1])
         for name in RISK_FEATURES:
             z = (row.iloc[0][name] - model.means[name]) / model.stds[name]
-            c = model.coef[name] * z
-            contribs.append((name, c, _feature_text(name, feats, z > 0)))
+            contribs.append((name, model.coef[name] * z, _feature_text(name, feats, z > 0)))
     else:
-        # Fallback heuristic when the model can't be trained (data missing).
         p_storm = 0.5
-    z = _logit(p_storm) + C.SEVERITY_LOGIT_STEP * (sev - C.REFERENCE_SEVERITY)
-    p = _sigmoid(z)
-    contribs.append(("storm_severity", C.SEVERITY_LOGIT_STEP * (sev - 3) + 0.01,
-                     f"The storm is rated {sev} out of 5."))
-    if poles > 0:
-        p = 1 - (1 - p) * math.exp(-0.5 * poles)
-        contribs.append(("damaged_poles", 1.0 + 0.3 * poles,
-                         f"{poles} damaged poles are assumed in this scenario."))
+    ref = model.ref_sorted
+    percentile = float(np.searchsorted(ref, p_storm) / len(ref)) if ref is not None and len(ref) else 0.5
+    return {"p_storm": p_storm, "percentile": percentile, "contribs": contribs}
 
-    top = sorted(contribs, key=lambda c: abs(c[1]), reverse=True)[:3]
-    reasons = [{"factor": "history" if f == "log_history" else f.replace("log_", ""),
-                "text": t,
-                "direction": "increases_risk" if c > 0 else "decreases_risk"} for f, c, t in top]
-    return {"risk_score": round(p, 2), "risk_band": _band(p), "reasons": reasons,
-            "p_reference_storm": p_storm}
+
+RISK_CUTS = (0.01, 0.04)  # chance of storm damage nearby: under 1% low (about a normal day), under 4% medium, otherwise high
+SIMILAR_DAYS_FULL, SIMILAR_DAYS_OK = 30, 8
+
+# Used only if the trained tables are missing. Confidence is "low" (no similar days), so the app falls back.
+FALLBACK_ANALOG = {
+    "rate": [[0.001, 0.002, 0.003], [0.004, 0.01, 0.02], [0.01, 0.03, 0.06], [0.03, 0.08, 0.17]],
+    "all": [0.002, 0.011, 0.03, 0.08], "days": [0, 0, 0, 0], "base_rate": 0.002, "cuts": [0.04, 0.1, 0.24, 0.39],
+    "repair_days": [0, 1, 1, 1, 2, 2, 3], "pole_repair_days": [0, 1, 2, 3],
+    "repair_source": "placeholder values (the trained tables are missing)",
+}
+
+
+def risk_band_for(rate: float) -> str:
+    return "low" if rate < RISK_CUTS[0] else "medium" if rate < RISK_CUTS[1] else "high"
+
+
+def severity_class(severity: int) -> int:
+    """Strengths 4 and 5 share one row of history: the records hold only 15 days that strong."""
+    return min(severity, 4) - 1
+
+
+def sample_confidence(n_days: int) -> str:
+    return "high" if n_days >= SIMILAR_DAYS_FULL else "medium" if n_days >= SIMILAR_DAYS_OK else "low"
+
+
+def area_risk(model: RiskModel, analog: dict, feats: dict, severity: int, poles: int) -> dict:
+    """Chance this area has storm damage within about 2 days, looked up from what actually happened
+    on days of this strength, for areas as exposed as this one."""
+    sc = area_score(model, feats)
+    cls = severity_class(severity)
+    rates = np.maximum(np.array(analog["rate"][cls], float), 1e-4)  # low, middle, high exposure
+    rate = float(np.exp(np.interp(sc["percentile"], [1 / 6, 1 / 2, 5 / 6], np.log(rates))))
+    n_days = int(analog["days"][cls])
+    if poles > 0:  # the customer says poles are down, so damage is assumed
+        rate = 1 - (1 - rate) * math.exp(-0.5 * poles)
+    rate = min(max(rate, 0.0), 0.99)
+    label = "4 or 5" if cls == 3 else str(severity)
+    reasons = [{
+        "factor": "storm_severity",
+        "text": (f"Storm strength is {severity} of 5. On the {n_days} days in the records rated {label} of 5, "
+                 f"{analog['all'][cls] * 100:.1f}% of areas had storm damage."),
+        "direction": "increases_risk" if severity >= 2 else "decreases_risk"}]
+    if poles > 0:
+        reasons.append({"factor": "damaged_poles", "text": f"{poles} damaged poles are assumed in this scenario.",
+                        "direction": "increases_risk"})
+    for f, c, t in sorted(sc["contribs"], key=lambda x: abs(x[1]), reverse=True):
+        reasons.append({"factor": "history" if f == "log_history" else f.replace("log_", ""), "text": t,
+                        "direction": "increases_risk" if c > 0 else "decreases_risk"})
+    return {"risk_score": round(rate, 4), "risk_band": risk_band_for(rate), "reasons": reasons[:3],
+            "similar_days": n_days, "times_normal": round(rate / max(analog["base_rate"], 1e-4), 1),
+            "percentile": sc["percentile"]}
 
 
 def model_confidence(model: RiskModel) -> str:
@@ -195,36 +235,13 @@ def history_confidence(feats: dict) -> str:
 
 # ============================================================================
 # RESTORATION (Monte Carlo)
-# Restoration engine: Monte Carlo over damage counts, labor, travel, crew availability.
+# Restoration: Monte Carlo over real repair times from the damage records.
 # ============================================================================
 
-CLASSES = list(C.PLACEHOLDER_LABOR_HOURS.keys())
-WORK_HOURS_PER_DAY = 16  # storm crews typically work 16-hour shifts
-
-
-def expected_damage(feats: dict, store, severity: int, damaged_poles: int) -> dict:
-    """Expected damage items per class for this area and storm.
-
-    Blends this area's own damage in the reference storm with the system average per
-    mile of line (50/50), then scales by severity. If the user sets damaged_poles, poles
-    are fixed and other damage follows the system's wire-per-pole mix.
-    """
-    circ = store.circuits
-    miles = feats.get("primary_miles") or float(circ.primary_miles.median())
-    total_miles = float(circ.primary_miles.sum())
-    lam = {}
-    for c in CLASSES:
-        own = float(feats.get(f"ref_{c}") or 0)
-        system_rate = float(circ[f"ref_{c}"].sum()) / total_miles if f"ref_{c}" in circ else 0.0
-        lam[c] = (0.5 * own + 0.5 * system_rate * miles) * C.SEVERITY_DAMAGE_MULT[severity]
-    if damaged_poles > 0:
-        mix = store.damage_mix
-        pole_share = mix.get("pole") or 0.2
-        for c in CLASSES:
-            if c != "pole":
-                lam[c] = max(lam[c], damaged_poles * mix.get(c, 0.0) / pole_share)
-        lam["pole"] = float(damaged_poles)
-    return lam
+MAX_ITEMS, MAX_POLES = 12, 20
+# Damaged items between a customer and the substation, by storm strength. This is an ASSUMPTION: the
+# records do not say which repairs a given customer waits on. Power returns when the slowest is done.
+PATH_ITEMS = [0.5, 1.0, 2.0, 3.0, 4.0]
 
 
 def _poisson_inverse(u: np.ndarray, lam: float) -> np.ndarray:
@@ -238,39 +255,30 @@ def _poisson_inverse(u: np.ndarray, lam: float) -> np.ndarray:
     return np.minimum(np.searchsorted(cdf, u, side="left"), kmax).astype(float)
 
 
-class Simulator:
-    """Holds the random draws for one request so every counterfactual reuses them."""
+class Draws:
+    """Random draws for one request. Every what-if reuses them, so only the changed input moves the range."""
 
-    def __init__(self, n: int = C.MC_SAMPLES, seed: int = C.MC_SEED):
+    def __init__(self, analog: dict, n: int = C.MC_SAMPLES, seed: int = C.MC_SEED):
         rng = np.random.default_rng(seed)
-        self.n = n
-        self.u_counts = rng.random((n, len(CLASSES)))
-        self.labor_noise = rng.lognormal(0.0, 0.25, (n, len(CLASSES)))
-        self.travel_noise = rng.lognormal(0.0, 0.2, n)
-        self.blocked_noise = rng.uniform(0.8, 1.3, n)
-        self.u_crews = rng.random((n, 50))
-        self.delay_u = rng.random(n)
-        self.queue = rng.beta(3, 2, n)  # where this area falls in the repair order
+        self.u_items = rng.random(n)
+        self.item_pick = rng.random((n, MAX_ITEMS))
+        self.item_jitter = rng.random((n, MAX_ITEMS))
+        self.pole_pick = rng.random((n, MAX_POLES))
+        self.pole_jitter = rng.random((n, MAX_POLES))
+        self.repairs = np.array(analog["repair_days"], float)
+        self.pole_repairs = np.array(analog["pole_repair_days"], float)
 
-    def run(self, lam: dict, poles_fixed: bool, crews: int, access_ok: bool, severity: int) -> np.ndarray:
-        counts = np.empty((self.n, len(CLASSES)))
-        for j, c in enumerate(CLASSES):
-            counts[:, j] = _poisson_inverse(self.u_counts[:, j], lam[c])
-        if poles_fixed:
-            counts[:, CLASSES.index("pole")] = lam["pole"]
-        # Restoration is conditional on an outage: at least one repair item.
-        none = counts.sum(axis=1) == 0
-        counts[none, CLASSES.index("fuse_switch")] = 1
-        hours = np.array([C.PLACEHOLDER_LABOR_HOURS[c] for c in CLASSES])
-        labor = (counts * hours * self.labor_noise).sum(axis=1)
-        travel = C.PLACEHOLDER_TRAVEL_MULT * self.travel_noise
-        if not access_ok:
-            travel = travel * C.BLOCKED_ROADS_TRAVEL_MULT * self.blocked_noise
-        crews_avail = np.maximum(1, (self.u_crews[:, :crews] < C.CREW_AVAILABILITY).sum(axis=1))
-        work = labor * travel * C.PLACEHOLDER_NONPRODUCTIVE_MULT / crews_avail
-        wall = work * self.queue * (24 / WORK_HOURS_PER_DAY)
-        delay = 1.0 + self.delay_u * (1.0 + severity)  # damage assessment and dispatch
-        return delay + wall
+    def run(self, severity: int, poles: int) -> np.ndarray:
+        """Hours until power is back: the slowest repair on the customer's path (real repair times)."""
+        items = np.clip(_poisson_inverse(self.u_items, PATH_ITEMS[severity - 1]), 1, MAX_ITEMS)
+        days = self.repairs[(self.item_pick * len(self.repairs)).astype(int)]
+        hours = (days + self.item_jitter) * 24  # records have whole days, so spread the time within the day
+        wait = np.where(np.arange(MAX_ITEMS)[None, :] < items[:, None], hours, 0.0).max(axis=1)
+        k = min(poles, MAX_POLES)
+        if k > 0:
+            pole_days = self.pole_repairs[(self.pole_pick[:, :k] * len(self.pole_repairs)).astype(int)]
+            wait = np.maximum(wait, ((pole_days + self.pole_jitter[:, :k]) * 24).max(axis=1))
+        return np.maximum(wait, 1.0)
 
 
 def summarize(samples: np.ndarray) -> dict:
@@ -278,7 +286,7 @@ def summarize(samples: np.ndarray) -> dict:
     def r(x):
         return float(round(x, 1))
     return {"low_hours": r(lo), "median_hours": r(med), "high_hours": r(max(hi, lo + 0.5)),
-            "method": "monte_carlo_p10_p90"}
+            "method": "empirical_monte_carlo_p10_p90"}
 
 
 def _delta_text(base: dict, new: dict) -> str:
@@ -300,37 +308,32 @@ def histogram(samples: np.ndarray, bins: int = 12) -> list[dict]:
 
 
 # Scenario field names used in what-if patches (match the API's Scenario model).
-_FIELD = {"sev": "storm_severity", "poles": "damaged_poles", "crews": "crews", "access": "access_ok"}
+_FIELD = {"sev": "storm_severity", "poles": "damaged_poles"}
 
 
-def estimate_restoration(feats: dict, store, scenario) -> dict:
-    sim = Simulator()
-    sev, poles, crews, access = (scenario.storm_severity, scenario.damaged_poles,
-                                 scenario.crews, scenario.access_ok)
+def estimate_restoration(analog: dict, scenario) -> dict:
+    draws = Draws(analog)
+    sev, poles = scenario.storm_severity, scenario.damaged_poles
 
-    def go(sev=sev, poles=poles, crews=crews, access=access):
-        lam = expected_damage(feats, store, sev, poles)
-        samples = sim.run(lam, poles > 0, min(crews, 50), access, sev)
-        return summarize(samples), lam, samples
+    def go(sev=sev, poles=poles):
+        samples = draws.run(sev, poles)
+        return summarize(samples), samples
 
-    base, lam, samples = go()
+    base, samples = go()
     variants = []
-    if crews < 50:
-        variants.append(("+1 crew", dict(crews=crews + 1)))
-    if crews <= 48:
-        variants.append(("+2 crews", dict(crews=crews + 2)))
-    variants.append(("roads cleared", dict(access=True)) if not access else ("roads blocked", dict(access=False)))
-    if poles > 1:
-        variants.append(("half as many damaged poles", dict(poles=poles // 2)))
     if sev > 1:
         variants.append(("storm one level weaker", dict(sev=sev - 1)))
+    if sev < 5:
+        variants.append(("storm one level stronger", dict(sev=sev + 1)))
+    if poles > 1:
+        variants.append(("half as many damaged poles", dict(poles=poles // 2)))
     deltas = []
     for label, kw in variants:
-        new, _, _ = go(**kw)
+        new, _ = go(**kw)
         deltas.append({"change": label, "new_range": new, "delta_text": _delta_text(base, new),
                        "scenario_patch": {_FIELD[k]: v for k, v in kw.items()}})
     spread = (base["high_hours"] - base["low_hours"]) / max(base["median_hours"], 1e-6)
-    return {"range": base, "deltas": deltas, "expected_damage": lam, "spread": spread,
+    return {"range": base, "deltas": deltas, "spread": spread,
             "histogram": histogram(samples), "simulations": int(samples.size)}
 
 
@@ -399,7 +402,7 @@ def alert(band: str, high_hours: float, needs: list[str], backup_hours: float | 
             return True, "R2: declared medical equipment need and outage risk"
     if band in ("medium", "high"):
         return True, "R1: risk band medium or high"
-    if high_hours >= 24:
+    if high_hours >= 24 and band != "low":
         return True, "R3: restoration could take more than 24 hours"
     return False, "R0: low risk and short expected outage, no proactive alert"
 
@@ -457,8 +460,6 @@ def build_rules(band: str, rng: dict, scenario) -> dict:
 TZ = ZoneInfo("America/New_York")
 WEATHER_FEATURES = ["gust", "gust_max2", "precip", "precip_prev", "precip3"]
 SEVERITY_LABELS = {1: "Calm", 2: "Breezy or wet", 3: "Stormy", 4: "Damaging storm", 5: "Severe storm"}
-# Chance-of-damage-day cut points for severity 2, 3, 4, 5.
-SEVERITY_CUTS = [0.05, 0.12, 0.30, 0.55]
 
 CACHE_SECONDS = 600
 _cache: dict = {}
@@ -479,8 +480,8 @@ def make_features(daily: pd.DataFrame) -> pd.DataFrame:
     }, index=daily.index).fillna(0.0)
 
 
-def severity_for(p: float) -> int:
-    return 1 + sum(p >= c for c in SEVERITY_CUTS)
+def severity_for(p: float, cuts: list[float]) -> int:
+    return 1 + sum(p >= c for c in cuts)
 
 
 # ---------------------------------------------------------------- model
@@ -592,7 +593,7 @@ def live_weather(model: dict | None, lat: float, lon: float) -> dict:
         idx = [i for i, d in enumerate(daily.date) if d >= today][:2]  # today and tomorrow
         i_peak = max(idx, key=lambda i: probs[i])
         p = float(probs[i_peak])
-        sev = severity_for(p)
+        sev = severity_for(p, model["analog"]["cuts"])
         row, drow = feats.iloc[i_peak], daily.iloc[i_peak]
         drow = {"gust": drow.gust, "precip3": row["precip3"]}
 
@@ -641,23 +642,68 @@ def fetch_history(start: date, end: date) -> pd.DataFrame:
                          "precip": d["precipitation_sum"]})
 
 
+SIGNIFICANT_REPORTS = 5  # a "damaging day" has at least this many damage reports (smaller days look random)
+SEVERITY_QUANTILES = [0.88, 0.96, 0.99, 0.997]  # strength 2 to 5 = the top 12%, 4%, 1%, 0.3% of days
+REPAIR_CAP_DAYS = 14  # a few records carry the data-pull date as a repair date; cap them
+
+
+def _clean_feats(row: dict) -> dict:
+    return {c: (v if isinstance(v, (list, str, bool)) or not pd.isna(v) else None) for c, v in row.items()}
+
+
+def build_analog(store, daily: pd.DataFrame, p_days: np.ndarray, cuts: list[float]) -> dict:
+    """What actually happened on days of each strength: the share of areas with storm damage (by how
+    exposed the area is), and real repair times from the cleanest storm."""
+    circ = store.circuits[store.circuits.n_customers >= C.MIN_CUSTOMERS_PER_LOCATION]
+    keys = list(circ.index)
+    kidx = {k: i for i, k in enumerate(keys)}
+    didx = {pd.Timestamp(d): i for i, d in enumerate(daily.date)}
+    hit = np.zeros((len(keys), len(daily)), bool)
+    a = store.arcos[store.arcos.key.isin(keys)]
+    for k, t in zip(a.key, a.Report_Tim.dt.normalize()):
+        if t in didx:
+            hit[kidx[k], didx[t]] = True
+    win = hit.copy()
+    win[:, :-1] |= hit[:, 1:]  # damage on this day or the next: reports lag the weather
+    model = train_risk(store)
+    scores = np.array([area_score(model, _clean_feats(circ.loc[k].to_dict()))["p_storm"] for k in keys])
+    tercile = np.digitize(scores, np.quantile(scores, [1 / 3, 2 / 3]))
+    band = 1 + sum((p_days >= c).astype(int) for c in cuts)
+    cls = np.minimum(band, 4) - 1
+    rate, all_rate, days = [], [], []
+    for c in range(4):
+        idx = np.where(cls == c)[0]
+        days.append(int(len(idx)))
+        all_rate.append(float(win[:, idx].mean()))
+        rate.append([float(win[np.ix_(tercile == t, idx)].mean()) for t in range(3)])
+    rate = np.maximum(np.maximum.accumulate(np.array(rate), axis=0), 3e-4)  # stronger storms never look safer
+    all_rate = np.maximum.accumulate(np.array(all_rate))
+    ref = a[(a.event_id == store.reference_event["id"]) & (a.Repaired == "Yes") & (a.repair_days >= 0)]
+    cap = lambda s: np.minimum(s, REPAIR_CAP_DAYS).astype(int).tolist()  # noqa: E731
+    return {"rate": np.round(rate, 5).tolist(), "all": np.round(all_rate, 5).tolist(), "days": days,
+            "base_rate": round(float(win[:, band == 1].mean()), 5), "cuts": [round(c, 5) for c in cuts],
+            "repair_days": cap(ref.repair_days), "pole_repair_days": cap(ref[ref.damage_class == "pole"].repair_days),
+            "repair_source": f"{len(ref)} repaired tickets from the {store.reference_event['label']}"}
+
+
 def train_weather() -> None:
     import pyogrio  # training only; not installed in the Docker image
 
+    store = data.load()
     arcos = pyogrio.read_dataframe(C.FILES["arcos"], read_geometry=False, columns=["Report_Tim"])
-    days = arcos.Report_Tim.dt.normalize()
-    start = days.min().date() - timedelta(days=7)
-    end = min(days.max().date(), date.today() - timedelta(days=3))
+    counts = arcos.Report_Tim.dt.normalize().value_counts()
+    start = counts.index.min().date() - timedelta(days=7)
+    end = min(counts.index.max().date(), date.today() - timedelta(days=3))
     daily = fetch_history(start, end).dropna().reset_index(drop=True)
-    y = daily.date.isin(set(days)).astype(int).values
+    y = (daily.date.map(counts).fillna(0).values >= SIGNIFICANT_REPORTS).astype(int)
     X = make_features(daily)[WEATHER_FEATURES]
     n = len(daily)
-    print(f"{n} days, {y.sum()} damage days ({y.mean():.1%}) from {daily.date.min().date()} to {daily.date.max().date()}")
+    print(f"{n} days, {y.sum()} damaging days ({y.mean():.1%}) from {daily.date.min().date()} to {daily.date.max().date()}")
 
     def new_model():
         return make_pipeline(StandardScaler(), LogisticRegression(C=C_REG, max_iter=2000))
 
-    # Out-of-time predictions
+    # Out-of-time predictions: every score comes from a model that never saw that day
     edges = np.linspace(int(n * 0.4), n, FOLDS + 1).astype(int)
     pred = np.full(n, np.nan)
     for a, b in zip(edges[:-1], edges[1:]):
@@ -676,16 +722,21 @@ def train_weather() -> None:
 
     final = new_model().fit(X, y)
     sc, lr = final.steps[0][1], final.steps[1][1]
+    p_days = final.predict_proba(X)[:, 1]
+    cuts = [float(np.quantile(p_days, q)) for q in SEVERITY_QUANTILES]
+    analog = build_analog(store, daily, p_days, cuts)
     out = {
         "features": WEATHER_FEATURES, "mean": sc.mean_.tolist(), "scale": sc.scale_.tolist(),
         "coef": lr.coef_[0].tolist(), "intercept": float(lr.intercept_[0]),
-        "severity_cuts": SEVERITY_CUTS, "metrics": metrics,
+        "label": f"a day with at least {SIGNIFICANT_REPORTS} damage reports", "metrics": metrics, "analog": analog,
         "trained_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "history": {"start": str(daily.date.min().date()), "end": str(daily.date.max().date())},
     }
     C.WEATHER_MODEL.write_text(json.dumps(out, indent=2), encoding="utf-8")
     print("coefficients:", dict(zip(WEATHER_FEATURES, np.round(out["coef"], 2))))
+    print("days per strength row:", analog["days"], "| area damage rate (all areas):", analog["all"])
     print("saved", C.WEATHER_MODEL)
+
 
 # ============================================================================
 # REQUEST ORCHESTRATION
@@ -735,30 +786,28 @@ def backtest(state: State) -> dict | None:
 def _assumptions(state: State, scenario) -> list[str]:
     m, ref = state.model, state.store.reference_event or {}
     ref_label = ref.get("label", "largest storm on record")
-    h = C.PLACEHOLDER_LABOR_HOURS
-    out = []
+    analog = (state.weather_model or {}).get("analog") or FALLBACK_ANALOG
+    out = [
+        "Storm strength (1 to 5) comes from the forecast. A small model scores how likely a day is to cause real damage "
+        f"({SIGNIFICANT_REPORTS} or more damage reports). Strengths 2 to 5 are the top 12%, 4%, 1%, and 0.3% of days since late 2022.",
+        "Your risk is what actually happened on days of this strength in the utility's records: the share of areas with "
+        "storm damage within about 2 days, for areas as exposed as yours.",
+    ]
     if m.ok:
-        out.append(f"Risk model: logistic regression on miles of overhead line, customers served, and past "
-                   f"damage. Trained on history before the {ref_label} and backtested on it "
-                   f"(AUC {m.auc:.2f} across {m.n_train} areas).")
+        out.append(f"How exposed an area is comes from a model of miles of overhead line, customers served, and past damage. "
+                   f"It was trained before the {ref_label} and backtested on it (AUC {m.auc:.2f} across {m.n_train} areas).")
         hi, lo = m.hit_rates.get("high", {}), m.hit_rates.get("low", {})
         if hi.get("rate") is not None and lo.get("rate") is not None:
-            out.append(f"Held-out check: of {hi['areas']} areas the model rated high risk for that storm, "
-                       f"{round(hi['rate'] * 100)}% had damage; of {lo['areas']} rated low, "
-                       f"{round(lo['rate'] * 100)}% did.")
+            out.append(f"Held-out check: of {hi['areas']} areas it rated high for that storm, {round(hi['rate'] * 100)}% had damage; "
+                       f"of {lo['areas']} rated low, {round(lo['rate'] * 100)}% did.")
     else:
-        out.append("Risk model unavailable; risk uses a neutral baseline adjusted for storm severity.")
+        out.append("Area exposure is unavailable, so a middle value is used.")
     out += [
-        f"Storm severity {C.REFERENCE_SEVERITY} is calibrated to the {ref_label}, the largest in the "
-        f"utility's damage records. Each level up or down changes the odds of an outage about {math.exp(C.SEVERITY_LOGIT_STEP):.0f} times (an assumption, not fitted to data).",
-        f"Expected damage blends this area's damage in the {ref_label} with the system average per mile of line.",
-        f"Labor hours per repair are placeholders until the STORMS file is provided: pole {h['pole']}, "
-        f"primary wire {h['primary_wire']}, transformer {h['transformer']}, fuse or switch {h['fuse_switch']} crew-hours.",
-        f"Travel multiplier {C.PLACEHOLDER_TRAVEL_MULT} and nonproductive multiplier "
-        f"{C.PLACEHOLDER_NONPRODUCTIVE_MULT} are placeholders until the indirect labor file is provided.",
-        f"Blocked roads add about {round((C.BLOCKED_ROADS_TRAVEL_MULT - 1) * 100)}% to travel and work time.",
-        f"Each crew is available {round(C.CREW_AVAILABILITY * 100)}% of the time and works "
-        f"{WORK_HOURS_PER_DAY}-hour shifts.",
+        f"Restoration uses real repair times: {analog.get('repair_source', 'the damage records')}. Dates in the records have "
+        "day precision, so each time is spread within its day.",
+        "Repair dates for other storms looked unreliable (many equal the date the data was pulled), so only that storm is used.",
+        "How many damaged items sit between you and the substation is an assumption: about 1 on a calm day, up to 4 in a severe storm. "
+        "Your power returns when the slowest of those repairs is done.",
     ]
     needs = [n.value if hasattr(n, "value") else n for n in scenario.declared_needs]
     if "medical_equipment" in needs:
@@ -769,24 +818,24 @@ def _assumptions(state: State, scenario) -> list[str]:
             out.append(f"Backup power for medical equipment is assumed to last {C.MEDICAL_BACKUP_HOURS} hours "
                        "unless you tell us otherwise.")
     if scenario.damaged_poles > 0:
-        out.append("Other damage (wires, fuses, transformers) is scaled from the pole count using the "
-                   f"{ref_label} damage mix.")
+        out.append("Each damaged pole you enter adds a repair drawn from real pole repair times, and damage is assumed.")
     return out
 
 
 def _limits(state: State, is_zip: bool = False) -> list[str]:
     out = [
         "Estimates are model output, not confirmed restoration times from the utility.",
-        f"The range covers the 10th to 90th percentile of {C.MC_SAMPLES} simulations; "
-        "actual times can fall outside it.",
+        f"The range covers the 10th to 90th percentile of {C.MC_SAMPLES} simulations; actual times can fall outside it.",
+        "The records cover a few storms and one large one, so rates for strong storms rest on few days. "
+        "Strengths 4 and 5 share one row of history (15 days).",
+        "The weather model ranks damaging days better than chance, but it misses many small damage days.",
         "Locations are neighborhood-level areas (one circuit), not individual homes.",
         "Damage records have day-level dates only, so past repair times are approximate.",
     ]
     if is_zip:
-        out.append("A ZIP code is served by several circuits. The estimate is for a typical one, "
-                   "and ZIP borders are approximate.")
+        out.append("A ZIP code is served by several circuits. The estimate is for a typical one, and ZIP borders are approximate.")
     if state.model.ok:
-        out.append(f"The risk model learned from {state.model.n_train} areas and one major storm; "
+        out.append(f"The area-exposure model learned from {state.model.n_train} areas and one major storm; "
                    "other storm types may behave differently.")
     if state.data_mode == "mock":
         out.append("Mock data is in use; numbers are illustrative only.")
@@ -821,12 +870,14 @@ def assess(state: State, location_id: str, scenario, request_id: str) -> dict | 
     if loc is None:
         return None
     f = loc.features
-    rk = score_risk(state.model, f, scenario)
-    rs = estimate_restoration(f, state.store, scenario)
+    analog = (state.weather_model or {}).get("analog") or FALLBACK_ANALOG
+    rk = area_risk(state.model, analog, f, scenario.storm_severity, scenario.damaged_poles)
+    rs = estimate_restoration(analog, scenario)
     rng = rs["range"]
 
     parts = {
         "model": model_confidence(state.model),
+        "sample": sample_confidence(rk["similar_days"]),
         "history": history_confidence(f),
         "spread": spread_confidence(rs["spread"]),
     }
@@ -840,6 +891,7 @@ def assess(state: State, location_id: str, scenario, request_id: str) -> dict | 
         if hr is not None:
             bit += f" ({round(hr * 100)}% of areas it rated high had damage)"
         reason_bits.append(bit)
+    reason_bits.append(f"{rk['similar_days']} similar days in the records")
     reason_bits.append(f"{n} past damage report{'s' if n != 1 else ''} in this area")
     reason_bits.append(f"restoration range spread {rs['spread']:.1f} times the median")
     confidence_reason = (f"Confidence is {confidence}: " + "; ".join(reason_bits) + ".")
@@ -849,7 +901,10 @@ def assess(state: State, location_id: str, scenario, request_id: str) -> dict | 
         fallback, fallback_reason = True, "Real utility data is not loaded, so these numbers are illustrative only."
     elif confidence == "low":
         fallback = True
-        if parts["history"] == "low":
+        if parts["sample"] == "low":
+            fallback_reason = ("We have too few days like this on record to rate it reliably. "
+                               "Treat the estimate as a rough guide.")
+        elif parts["history"] == "low":
             fallback_reason = ("We have no past storm damage records for this area, so we can't check the "
                                "model here. Treat the estimate as a rough guide.")
         elif parts["model"] == "low":
@@ -882,6 +937,8 @@ def assess(state: State, location_id: str, scenario, request_id: str) -> dict | 
             "alert_rule": rl["alert_rule"],
             "restoration_histogram": rs["histogram"],
             "simulations": rs["simulations"],
+            "similar_days": rk["similar_days"],
+            "times_normal": rk["times_normal"],
         },
         "customer_actions": rl["customer_actions"],
         "meta": {

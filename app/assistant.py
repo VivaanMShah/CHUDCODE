@@ -201,7 +201,7 @@ def build_facts(a: dict, wx: dict | None, scenario=None) -> dict:
     facts: dict = {
         "area": (a.get("area") or {}).get("label", "your area"),
         "outage_risk": est["risk_band"],
-        "outage_risk_percent": round(est["risk_score"] * 100),
+        "chance_of_storm_damage_near_you_percent": round(est["risk_score"] * 100, 1),
         "confidence": est["confidence"],
         "restoration_hours": {"low": r["low_hours"], "high": r["high_hours"]},  # range only, never one number
         "alert_eligible": est["alert_eligible"],
@@ -238,7 +238,8 @@ def _chat_span(f: dict) -> str:
 def template_answer(question: str, f: dict) -> str:
     """Safe fallback. Built only from the facts, so its numbers always match."""
     q = question.lower()
-    risk = f"Your outage risk is {f['outage_risk']}, about {f['outage_risk_percent']}%. This is an estimate."
+    risk = (f"Your chance of storm damage nearby is {f['outage_risk']}, about "
+            f"{_fmt(f['chance_of_storm_damage_near_you_percent'])}%. This is an estimate.")
     span = f"If the power goes out, we estimate {_chat_span(f)} to restore it."
     steps = " ".join(f["next_steps"][:2])
     if any(w in q for w in ("911", "emergency", "danger", "hurt", "fire", "downed", "wire")):

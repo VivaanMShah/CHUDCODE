@@ -1,0 +1,745 @@
+/* ==========================================================================
+   Brutalist skin. Loaded last, so it overrides the base styles.
+   Paper and ink, thick borders, hard offset shadows, square corners, no gradients or glow.
+   System fonts only (no web fonts, so nothing is fetched from another site).
+   ========================================================================== */
+
+:root {
+  --ink: #0b0b0b;
+  --paper: #f1ede3;
+  --bg-0: var(--paper);
+  --bg-1: var(--paper);
+  --bg-2: #e6e0d2;
+  --card: #ffffff;
+  --card-solid: #ffffff;
+  --border: var(--ink);
+  --border-strong: var(--ink);
+  --text: var(--ink);
+  --text-dim: #333333;
+  --text-faint: #666666;
+  --blue: #1d4dff;
+  --blue-soft: #dbe3ff;
+  --yellow: #ffd60a;
+  --orange: #ff5a1f;
+  --red: #ee2d24;
+  --red-soft: #ffd9d6;
+  --green: #17c964;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --font-sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: "Courier New", ui-monospace, Menlo, monospace;
+  --shadow: 6px 6px 0 var(--ink);
+  --shadow-sm: 3px 3px 0 var(--ink);
+}
+
+html,
+body {
+  background: var(--paper);
+  color: var(--ink);
+}
+body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+
+/* App frame: graph paper */
+.app {
+  background-color: var(--paper);
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+  border-color: var(--ink);
+}
+@media (min-width: 480px) {
+  .app {
+    border-left: 3px solid var(--ink);
+    border-right: 3px solid var(--ink);
+  }
+}
+
+/* ---- Type ---- */
+h1,
+h2,
+h3 {
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+.screen-header h1,
+.chat__header h1 {
+  font-size: 30px;
+  text-transform: uppercase;
+  line-height: 1;
+}
+.screen-header p,
+.chat__header p {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.eyebrow {
+  display: inline-block;
+  padding: 2px 7px;
+  background: var(--ink);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.dim,
+.faint {
+  color: var(--text-dim);
+}
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* ---- Cards ---- */
+.card,
+.details,
+.note,
+.fallback {
+  background: #fff;
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  box-shadow: var(--shadow);
+  backdrop-filter: none;
+}
+.card {
+  padding: 16px;
+}
+.stack {
+  gap: 20px;
+}
+.card.is-muted {
+  opacity: 1;
+  background-image: repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.05) 0 8px, transparent 8px 16px);
+}
+.note {
+  background: var(--yellow);
+  box-shadow: var(--shadow-sm);
+}
+.note span {
+  color: var(--ink);
+}
+.fallback {
+  background-color: #d8d4c8;
+  background-image: repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.07) 0 8px, transparent 8px 16px);
+}
+.fallback__title {
+  text-transform: uppercase;
+}
+
+/* ---- Buttons, chips, links ---- */
+.link {
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.link--dim {
+  color: var(--text-dim);
+}
+.chip,
+.help__btn,
+.sms__go,
+.about-me__done,
+.radar__play {
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  transition: none;
+}
+.chip {
+  padding: 6px 10px;
+  font-size: 11px;
+}
+.chip:hover,
+.help__btn:hover {
+  background: var(--yellow);
+}
+.chip:active,
+.help__btn:active,
+.sms__go:active,
+.about-me__done:active,
+.radar__play:active {
+  transform: translate(3px, 3px);
+  box-shadow: none;
+}
+.chip.is-on {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+.chip--delta {
+  text-transform: none;
+}
+.chip--delta small,
+.chip--delta small.is-faster,
+.chip--delta small.is-slower {
+  color: inherit;
+  font-weight: 700;
+}
+.chip--delta small.is-faster::before {
+  content: "▼ ";
+}
+.chip--delta small.is-slower::before {
+  content: "▲ ";
+}
+.sms__go,
+.about-me__done {
+  background: var(--yellow);
+  padding: 12px;
+  border-radius: 0;
+}
+.help__btn--urgent {
+  background: var(--red);
+  color: #fff;
+}
+.help__btn--urgent small {
+  color: #fff;
+}
+.radar__play {
+  width: 38px;
+  height: 38px;
+  border-radius: 0;
+}
+
+/* ---- Hero ---- */
+.home__city {
+  font-size: 20px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.status {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.status.is-live::before {
+  border-radius: 0;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--ink);
+  box-shadow: none;
+}
+.hero__weather {
+  font-size: 46px;
+  font-weight: 900;
+  text-transform: uppercase;
+  line-height: 0.95;
+  letter-spacing: -0.03em;
+}
+.hero__sub,
+.hero__why {
+  color: var(--ink);
+}
+.hero__divider {
+  height: 3px;
+  background: var(--ink);
+}
+.hero__risk {
+  display: inline-block;
+  padding: 3px 12px;
+  border: 3px solid var(--ink);
+  font-size: 22px;
+  font-weight: 900;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.hero__risk--low {
+  background: var(--green);
+}
+.hero__risk--medium {
+  background: var(--yellow);
+}
+.hero__risk--high {
+  background: var(--orange);
+}
+.hero__range {
+  font-family: var(--font-mono);
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+.hero__updating {
+  font-family: var(--font-mono);
+  color: var(--ink);
+}
+.pill {
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  background: #fff;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.pill--high {
+  background: var(--green);
+}
+.pill--medium {
+  background: var(--yellow);
+}
+.pill--low {
+  background: #d8d4c8;
+}
+.badge {
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  background: var(--yellow);
+  color: var(--ink);
+}
+
+/* ---- Range bar ---- */
+.rangebar__col {
+  background: #cfc9ba;
+  border-radius: 0;
+}
+.rangebar__col.is-inside {
+  background: var(--ink);
+}
+.rangebar__track {
+  height: 12px;
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  background: #fff;
+}
+.rangebar__fill {
+  background: var(--orange);
+  border-radius: 0;
+}
+.rangebar__median {
+  top: -7px;
+  height: 22px;
+  width: 4px;
+  background: var(--ink);
+  border-radius: 0;
+}
+.rangebar__scale {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* ---- Controls ---- */
+.segmented {
+  gap: 0;
+  padding: 0;
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  background: #fff;
+}
+.segmented__item {
+  border-radius: 0;
+  border-right: 2px solid var(--ink);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-weight: 800;
+}
+.segmented__item:last-child {
+  border-right: 0;
+}
+.segmented__item.is-on {
+  background: var(--ink);
+  color: #fff;
+}
+.switch {
+  width: 54px;
+  height: 30px;
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  background: #fff;
+}
+.switch.is-on {
+  background: var(--yellow);
+}
+.switch__thumb {
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 0;
+  background: var(--ink);
+  box-shadow: none;
+}
+.switch.is-on .switch__thumb {
+  transform: translateX(24px);
+}
+input[type="range"] {
+  accent-color: var(--ink);
+}
+.simulate input[type="range"],
+.radar__controls input,
+.about-me__slider input {
+  accent-color: var(--ink);
+}
+.scenario__label strong {
+  background: var(--yellow);
+  padding: 0 6px;
+  border: 2px solid var(--ink);
+  font-weight: 800;
+}
+
+/* ---- Lists and details ---- */
+.qualify__icon {
+  border-radius: 0;
+  border: 3px solid var(--ink);
+  background: #fff;
+  color: var(--ink);
+}
+.qualify__icon.is-on {
+  background: var(--green);
+  color: var(--ink);
+}
+.details summary {
+  text-transform: uppercase;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+.details summary::after {
+  color: var(--ink);
+  font-size: 20px;
+}
+.details details + details {
+  border-top: 3px solid var(--ink);
+}
+.chain__node {
+  border-radius: 0;
+  border: 3px solid var(--ink);
+  background: #fff;
+}
+.chain__step--you .chain__node {
+  background: var(--orange);
+}
+.chain__step + .chain__step::before {
+  background: var(--ink);
+  width: 3px;
+}
+.about__label {
+  color: var(--ink);
+  background: var(--yellow);
+  display: inline-block;
+  padding: 2px 6px;
+  border: 2px solid var(--ink);
+}
+.checklist li::before {
+  color: var(--ink);
+  font-weight: 900;
+}
+
+/* ---- Bottom nav ---- */
+.bottom-nav {
+  background: var(--ink);
+  border-top: 3px solid var(--ink);
+  backdrop-filter: none;
+}
+.bottom-nav__item {
+  color: #fff;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  font-weight: 700;
+  border-radius: 0;
+}
+.bottom-nav__item.is-active {
+  background: var(--yellow);
+  color: var(--ink);
+}
+.bottom-nav__badge {
+  background: var(--red);
+  color: #fff;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+}
+
+/* ---- ZIP and About sheets ---- */
+.picker {
+  background: rgba(11, 11, 11, 0.55);
+  backdrop-filter: none;
+}
+.picker__sheet {
+  background: var(--paper);
+  border-top: 4px solid var(--ink);
+  border-radius: 0;
+}
+.picker__search {
+  background: #fff;
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  box-shadow: var(--shadow-sm);
+}
+.picker__search input {
+  color: var(--ink);
+}
+.picker__zip input {
+  font-weight: 800;
+}
+.picker__note--error {
+  color: var(--red);
+  font-weight: 700;
+}
+.picker__close {
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  background: #fff;
+  color: var(--ink);
+}
+.about-me legend {
+  text-transform: uppercase;
+  font-weight: 900;
+}
+
+/* ---- Chat ---- */
+.chat__header {
+  border-bottom: 3px solid var(--ink);
+  background: var(--yellow);
+}
+.bubble {
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  box-shadow: var(--shadow-sm);
+  color: var(--ink);
+}
+.bubble--user {
+  background: var(--yellow);
+}
+.bubble--assistant {
+  background: #fff;
+}
+.bubble__time,
+.bubble__check {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.chat__composer {
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  background: #fff;
+}
+.chat__composer input {
+  color: var(--ink);
+}
+.chat__send {
+  background: var(--ink);
+  color: #fff;
+  border-radius: 0;
+}
+.chat__clear {
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration: underline;
+}
+.chat__disclaimer {
+  color: var(--text-dim);
+}
+
+/* ---- Text alerts demo ---- */
+.sms__demo {
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  background: var(--yellow);
+  color: var(--ink);
+}
+.sms__field input {
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  background: #fff;
+  color: var(--ink);
+}
+.sms__phone {
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  background: #fff;
+}
+.sms__bar {
+  background: var(--ink);
+  color: #fff;
+  border-bottom: 3px solid var(--ink);
+}
+.sms__bar small {
+  color: #ddd;
+}
+.sms__quiet {
+  background: var(--yellow);
+  color: var(--ink);
+}
+.sms__bubble {
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  color: var(--ink);
+}
+.sms__bubble--app {
+  background: #fff;
+}
+.sms__bubble--me {
+  background: var(--yellow);
+}
+.sms__stage,
+.sms__time {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+.sms__typing i {
+  background: var(--ink);
+  border-radius: 0;
+}
+.sms__actions {
+  border-top: 3px solid var(--ink);
+}
+.sms__note {
+  color: var(--text-dim);
+}
+.notif {
+  background: #fff;
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: none;
+}
+.notif__app {
+  text-transform: uppercase;
+}
+.notif__check.is-ok {
+  color: var(--ink);
+  background: var(--green);
+  padding: 0 4px;
+}
+
+/* ---- Timeline, prepare, alerts ---- */
+.timeline__dot {
+  border-radius: 0;
+  border: 3px solid var(--ink);
+  color: var(--ink);
+  background: #fff;
+}
+.timeline__stage.is-on .timeline__dot {
+  background: var(--ink);
+  color: #fff;
+}
+.timeline__stage + .timeline__stage::before {
+  background: var(--ink);
+  width: 3px;
+}
+.prep__box {
+  border-radius: 0;
+  border: 3px solid var(--ink);
+  background: #fff;
+}
+.prep__item.is-done .prep__box {
+  background: var(--green);
+  color: var(--ink);
+}
+.downed__button {
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  background: var(--red);
+  color: #fff;
+  text-transform: uppercase;
+  box-shadow: var(--shadow-sm);
+}
+.alert,
+.alert__head {
+  border-radius: 0;
+}
+.nws strong {
+  text-transform: uppercase;
+}
+
+/* ---- Radar and map ---- */
+.radar__frame {
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  background: #fff;
+}
+.radar__map,
+.leaflet-container {
+  background: #e6e0d2;
+}
+.leaflet-tile-pane {
+  filter: grayscale(0.35) contrast(1.05); /* the light topographic map, slightly muted */
+}
+.radar__time {
+  background: var(--ink);
+  color: var(--yellow);
+  border-radius: 0;
+  font-weight: 800;
+}
+.radar__legend i {
+  border: 2px solid var(--ink);
+  border-radius: 0;
+}
+.leaflet-bar a {
+  background: #fff;
+  color: var(--ink);
+  border: 2px solid var(--ink);
+  border-radius: 0 !important;
+}
+.leaflet-control-attribution {
+  background: var(--paper) !important;
+  color: var(--ink) !important;
+}
+.leaflet-container a {
+  color: var(--blue);
+}
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: #fff;
+  color: var(--ink);
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  box-shadow: var(--shadow-sm);
+}
+.pin-popup span {
+  color: var(--text-dim);
+}
+.pin {
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 3px 3px 0 var(--ink);
+}
+.pin--hospital {
+  background: var(--red);
+}
+.pin--fire {
+  background: var(--orange);
+}
+.pin--police {
+  background: var(--blue);
+}
+.places__list li {
+  border-top: 3px solid var(--ink);
+}
+.places__main small,
+.places__actions a {
+  color: var(--ink);
+}
+.places__actions a {
+  font-weight: 800;
+  text-decoration: underline;
+}
+.radar__caption a {
+  color: var(--blue);
+}
+.sample-tag {
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  background: var(--yellow);
+  color: var(--ink);
+}
+
+.hero__risk {
+  display: block;
+  width: max-content;
+  margin-top: 8px;
+}

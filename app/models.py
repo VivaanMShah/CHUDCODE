@@ -101,6 +101,8 @@ class ModelEstimate(BaseModel):
     alert_rule: str
     restoration_histogram: Optional[List[HistogramBin]] = None
     simulations: Optional[int] = None
+    similar_days: Optional[int] = None   # days in the records with a storm this strong (sample size behind the risk)
+    times_normal: Optional[float] = None  # risk compared with a normal day
 
 
 class Escalation(BaseModel):
