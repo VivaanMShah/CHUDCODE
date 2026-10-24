@@ -46,6 +46,7 @@ interface AssessmentContextValue {
   useLive: boolean; // true = storm strength from live weather
   setUseLive: (on: boolean) => void;
   data: AssessResponse | null; // last good estimate (kept while a new one loads)
+  quiet: boolean; // no storm: calm weather and low risk. Screens stop giving safety advice.
   savedAt: string | null; // set when showing a saved copy because the backend is unreachable
   loading: boolean;
   error: string | null;
@@ -117,6 +118,8 @@ export function AssessmentProvider({ children }: { children: ReactNode }) {
     () => (liveSeverity ? { ...base, storm_severity: liveSeverity } : base),
     [base, liveSeverity],
   );
+
+  const quiet = !!data && scenario.storm_severity <= 2 && data.model_estimate.risk_band === "low";
 
   useEffect(() => {
     try {
@@ -198,8 +201,8 @@ export function AssessmentProvider({ children }: { children: ReactNode }) {
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   const value = useMemo<AssessmentContextValue>(
-    () => ({ scenario, updateScenario, resetScenario, live, useLive, setUseLive, data, savedAt, loading, error, retry }),
-    [scenario, updateScenario, resetScenario, live, useLive, data, savedAt, loading, error, retry],
+    () => ({ scenario, updateScenario, resetScenario, live, useLive, setUseLive, data, quiet, savedAt, loading, error, retry }),
+    [scenario, updateScenario, resetScenario, live, useLive, data, quiet, savedAt, loading, error, retry],
   );
   return <AssessmentContext.Provider value={value}>{children}</AssessmentContext.Provider>;
 }

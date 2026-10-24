@@ -558,3 +558,11 @@
 .link--dim {
   color: var(--text-dim);
 }
+
+/* ---- No storm ---- */
+.quiet-card p {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}

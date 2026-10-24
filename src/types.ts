@@ -35,6 +35,7 @@ export interface ChatMessage {
   role: ChatRole;
   text: string;
   sentAt: string; // "11:14 AM"
+  checked?: boolean; // assistant answers written by the model, with every number verified
 }
 
 // What the backend sends back for each question.

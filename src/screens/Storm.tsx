@@ -20,7 +20,7 @@ function loadDone(): string[] {
 
 export default function Storm() {
   const { location } = useLocation();
-  const { data, error, live, scenario } = useAssessment();
+  const { data, error, live, scenario, quiet } = useAssessment();
   const { profile } = useProfile();
   const [done, setDone] = useState<string[]>(loadDone);
   const [reporting, setReporting] = useState(false);
@@ -58,19 +58,7 @@ export default function Storm() {
   const range = data.model_estimate.restoration_range;
   const doneCount = actions.filter((a) => done.includes(a)).length;
 
-  return (
-    <div className="screen storm">
-      <header className="screen-header">
-        <div>
-          <h1>Get ready</h1>
-          <p>
-            For {location?.label} · outages here could last{" "}
-            {formatRange(range.low_hours, range.high_hours)}
-          </p>
-        </div>
-      </header>
-
-      <div className="stack">
+  const prepSection = (
         <section className="card">
           <div className="prep__top">
             <span className="eyebrow">Prepare</span>
@@ -106,6 +94,33 @@ export default function Storm() {
             })}
           </ul>
         </section>
+  );
+
+  return (
+    <div className="screen storm">
+      <header className="screen-header">
+        <div>
+          <h1>Get ready</h1>
+          <p>
+            For {location?.label} · outages here could last{" "}
+            {formatRange(range.low_hours, range.high_hours)}
+          </p>
+        </div>
+      </header>
+
+      <div className="stack">
+        {quiet ? (
+          <section className="card quiet-card">
+            <strong>No storm expected</strong>
+            <p>Nothing to do right now. We'll tell you if that changes.</p>
+            <details className="optional">
+              <summary>Get ready early (optional)</summary>
+              {prepSection}
+            </details>
+          </section>
+        ) : (
+          prepSection
+        )}
 
         {/* Downed line: safety guidance only. There is no reporting backend (demo). */}
         <section className="card downed">
@@ -130,6 +145,7 @@ export default function Storm() {
           )}
         </section>
 
+        {!quiet && (
         <section className="card">
           <span className="eyebrow">Stay safe</span>
           <ul className="safety-list">
@@ -138,6 +154,7 @@ export default function Storm() {
             ))}
           </ul>
         </section>
+        )}
       </div>
     </div>
   );

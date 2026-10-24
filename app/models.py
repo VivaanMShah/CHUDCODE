@@ -185,10 +185,16 @@ class LocationsResponse(BaseModel):
     data_mode: Literal["mock", "live"]
 
 
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    text: str = Field(..., max_length=400)
+
+
 class ChatRequest(BaseModel):
     location_id: str = Field(..., max_length=32)
     question: str = Field(..., min_length=1, max_length=300)
     scenario: Scenario = Field(default_factory=Scenario)
+    history: List[ChatTurn] = Field(default_factory=list, max_length=6)  # recent turns, for follow-ups
 
 
 class ChatResponse(BaseModel):

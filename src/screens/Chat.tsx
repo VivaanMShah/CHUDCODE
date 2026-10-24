@@ -14,6 +14,29 @@ const STARTER_QUESTIONS = [
   "Why is my risk this level?",
 ];
 
+const HISTORY_KEY = "storm-watch:chat";
+const MAX_SAVED = 40;
+
+const welcome = (): ChatMessage[] => [
+  {
+    id: "welcome",
+    role: "assistant",
+    text: "Hi! Ask me about your outage risk, how long repairs could take, and how to get ready. My answers come only from your estimate, and every number is checked. In an emergency, call 911.",
+    sentAt: timeNow(),
+  },
+];
+
+// The conversation is saved on this device only, so it survives switching tabs and reloading.
+function loadHistory(): ChatMessage[] {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "null");
+    if (Array.isArray(v) && v.length > 0) return v as ChatMessage[];
+  } catch {
+    /* fall through to a fresh chat */
+  }
+  return welcome();
+}
+
 function timeNow(): string {
   return new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
@@ -22,21 +45,27 @@ export default function Chat() {
   const { location } = useLocation();
   const { scenario } = useAssessment();
 
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      text: "Hi! Ask me about your outage risk, how long repairs could take, and how to get ready. My answers come only from your estimate, and every number is checked. In an emergency, call 911.",
-      sentAt: timeNow(),
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>(loadHistory);
   const [suggestions, setSuggestions] = useState<string[]>(STARTER_QUESTIONS);
   const [draft, setDraft] = useState("");
   const [waiting, setWaiting] = useState(false);
 
   const listRef = useRef<HTMLDivElement>(null);
   const idCounter = useRef(0);
-  const nextId = () => `m${++idCounter.current}`;
+  const nextId = () => `m${Date.now()}-${++idCounter.current}`;
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(messages.slice(-MAX_SAVED)));
+    } catch {
+      /* not critical */
+    }
+  }, [messages]);
+
+  function clearHistory() {
+    setMessages(welcome());
+    setSuggestions(STARTER_QUESTIONS);
+  }
 
   // Keep the newest message in view.
   useEffect(() => {
@@ -61,10 +90,14 @@ export default function Chat() {
 
     try {
       if (!location) throw new Error("no ZIP");
-      const reply = await askConcierge(location.locationId, scenario, question);
+      const earlier = messages
+        .filter((m) => m.id !== "welcome")
+        .slice(-6)
+        .map((m) => ({ role: m.role, text: m.text.slice(0, 400) }));
+      const reply = await askConcierge(location.locationId, scenario, question, earlier);
       setMessages((m) => [
         ...m,
-        { id: nextId(), role: "assistant", text: reply.answer, sentAt: timeNow() },
+        { id: nextId(), role: "assistant", text: reply.answer, sentAt: timeNow(), checked: reply.source === "model" && reply.validated },
       ]);
       setSuggestions(reply.suggestions);
     } catch {
@@ -92,9 +125,12 @@ export default function Chat() {
     <div className="chat">
       <header className="chat__header">
         <div>
-          <h1>Weather assistant</h1>
-          <p>Answers come from your estimate. Numbers are checked.</p>
+          <h1>Ask the concierge</h1>
+          <p>Saved on this device only. Numbers are checked.</p>
         </div>
+        {messages.length > 1 && (
+          <button type="button" className="chat__clear" onClick={clearHistory}>Clear history</button>
+        )}
       </header>
 
       <div
@@ -108,7 +144,10 @@ export default function Chat() {
           <div key={m.id} className={`bubble-row bubble-row--${m.role}`}>
             <div className={`bubble bubble--${m.role}`}>
               <p>{m.text}</p>
-              <span className="bubble__time">{m.sentAt}</span>
+              <span className="bubble__time">
+                {m.sentAt}
+                {m.checked && <span className="bubble__check"> · ✓ numbers checked</span>}
+              </span>
             </div>
           </div>
         ))}
@@ -146,7 +185,7 @@ export default function Chat() {
             type="text"
             value={draft}
             onChange={(e) => setDraft(e.target.value.slice(0, MAX_LENGTH))}
-            placeholder="Ask about the weather…"
+            placeholder="Ask about your outage risk…"
             aria-label="Your question"
             autoComplete="off"
             enterKeyHint="send"

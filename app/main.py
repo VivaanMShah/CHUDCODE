@@ -134,7 +134,8 @@ def chat_endpoint(req: ChatRequest, request: Request):
     s = _state()
     loc = resolve(s.store, req.location_id)
     wx = weather.live_weather(s.weather_model, loc.lat, loc.lon) if loc and loc.lat is not None else None
-    out = chat.answer(s, req.location_id, req.scenario, req.question, rid, wx)
+    out = chat.answer(s, req.location_id, req.scenario, req.question, rid, wx,
+                      [t.model_dump() for t in req.history])
     if out is None:
         safety.audit("/chat", rid, req.location_id, req.scenario, None, t0, 404)
         raise HTTPException(404, f"Unknown location_id: {req.location_id}")

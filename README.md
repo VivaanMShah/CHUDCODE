@@ -111,7 +111,7 @@ Retrain with `python -m app.train_weather` (needs internet). It writes `app/weat
 - No names, addresses, coordinates, or customer ids in any response. Customer points are used once at startup to match ZIPs, then dropped.
 - The audit log keeps only the first 3 digits of a ZIP (`ZIP-240xx`).
 - uvicorn's access log records request paths (which include the ZIP). Turn it off or shorten it in production (`--no-access-log`).
-- Radar "Find a hospital" opens Google Maps with the ZIP. It is a link the customer taps, not data we send. Real hospital names, numbers, and locations from the provided data are never returned (hard rule 5).
+- **Map pins** come from public OpenStreetMap data, fetched by the customer's browser. Our API never returns facility locations, and the organizers' priority-locations file (hospitals, fire, ambulance) is not used for pins. The browser contacts CARTO (map tiles) and the OpenStreetMap Overpass servers with the ZIP's area, never an exact location. ZIP centers ship as a small public file (`public/zip-centers.json`). The free Overpass servers can be slow (the first load can take about 45 seconds); results are cached on the device for a week. If they are down the map still works without pins.
 
 ## Scenario input (shared by /assess and /message)
 
@@ -289,12 +289,12 @@ React app in `src/`, wired to this API:
 | Screen | What it does |
 |---|---|
 | ZIP picker | Types a ZIP, `GET /zip/{zip}` on the 5th digit |
-| Home | One hero card: live weather, outage risk, restoration range with histogram, what-if chips. "Try a storm" panel for the simulator. Collapsible details: why, upstream chain, utility records, About |
-| Radar | Forecast illustration drawn from the hourly forecast (not real radar imagery): play and scrub 12 hours, Rain and Wind layers, tap a spot for conditions, and a "Need help?" panel (911, the power company, find a hospital, find a shelter) |
-| Alerts | Real NWS alerts, the outage alert rule and escalation, and the 4-stage message timeline with "Verified numbers" |
+| Home | One hero card: live weather, outage risk, restoration range with histogram, what-if chips. With no storm (calm weather, low risk) it just says "All clear" and drops the safety advice. "Try a storm" panel for the simulator. Collapsible details: why, upstream chain, utility records, About |
+| Radar | A real map (CARTO dark tiles) with the forecast rain or wind drawn over it. Play and scrub 12 hours, tap anywhere for conditions. Pins for nearby hospitals, fire stations, and police from OpenStreetMap, with Call (when OpenStreetMap lists a number) and Directions. Not live radar imagery |
+| Alerts | Real NWS alerts, a pretend text-alert signup (fake form, a phone-style SMS thread plays the 4 stage messages; the number is never saved or sent), the outage alert rule, and the stage timeline |
 | Prepare | Checklist, safety messages, downed-line guidance (demo, no reporting) |
 | About you | Optional sheet (Home, after choosing a ZIP): household, home type, well pump, electric heat, generator, power needs, preferred contact. Saved on the device only. Tailors the tips and contact line. Only power needs and backup hours are sent with an estimate |
-| Chat | Ask the concierge: `POST /chat`, four starter questions, answers from your estimate only |
+| Chat | Ask the concierge: `POST /chat`. The conversation is saved on the device (last 40 messages), follow-ups send the last 6 turns, and "Clear history" wipes it |
 
 - API layer: `src/api/backend.ts`, types in `src/api/contract.ts`, contact numbers in `src/config.ts` (the power company line is the Appalachian Power Virginia outage number).
 - The last estimate is saved on the device and shown with an offline note if the backend is unreachable.

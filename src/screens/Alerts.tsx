@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getMessage } from "../api/backend";
 import type { Band, MessageResponse, MessageType } from "../api/contract";
 import { CHANNEL_LABEL, bandLabel, useAssessment } from "../assessment";
+import SmsDemo from "../components/SmsDemo";
 import { useLocation } from "../location";
 import { useProfile } from "../profile";
 import type { AlertSeverity, WeatherAlert } from "../types";
@@ -91,7 +92,7 @@ function loadPush(): boolean {
 
 export default function Alerts() {
   const { location } = useLocation();
-  const { scenario, data, error, live } = useAssessment();
+  const { scenario, data, error, live, quiet } = useAssessment();
   const { profile } = useProfile();
   const [open, setOpen] = useState(true);
   const [pushEnabled, setPushEnabled] = useState(loadPush);
@@ -237,9 +238,16 @@ export default function Alerts() {
           </ul>
         </section>
 
+        <SmsDemo />
+
         {/* Storm timeline: the whole customer journey, one stage at a time */}
         <section className="card">
           <span className="eyebrow">Storm timeline · tap a stage</span>
+          {quiet && (
+            <p className="dim nws__empty">
+              No storm is expected right now. These are previews of what we'd send if one is forecast.
+            </p>
+          )}
           <ol className="timeline">
             {STAGES.map((st, i) => {
               const on = msgType === st.id;

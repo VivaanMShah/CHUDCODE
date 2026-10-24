@@ -228,3 +228,19 @@
   text-align: center;
   color: var(--text-faint);
 }
+/* ---- History controls ---- */
+.chat__clear {
+  align-self: center;
+  font-size: 12px;
+  color: var(--blue);
+}
+.bubble__check {
+  color: var(--green);
+}
+
+.chat__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}

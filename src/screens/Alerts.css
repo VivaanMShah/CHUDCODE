@@ -307,3 +307,178 @@
   margin-top: 8px;
   font-size: 12.5px;
 }
+
+/* ---- Text alerts demo ---- */
+.sms__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sms__demo {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(230, 196, 109, 0.5);
+  color: var(--yellow);
+  font-size: 10px;
+  font-weight: 600;
+}
+.sms__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+.sms__lead {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.sms__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.sms__field input {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-size: 16px;
+  font-family: var(--font-mono);
+}
+.sms__consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.sms__consent input {
+  margin-top: 2px;
+  accent-color: var(--blue);
+}
+.sms__go {
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--blue);
+  color: #0c1522;
+  font-weight: 700;
+}
+.sms__go:disabled {
+  opacity: 0.4;
+}
+.sms__note {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.sms__phone {
+  margin-top: 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border-strong);
+  background: #0a1018;
+  overflow: hidden;
+}
+.sms__bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 13px;
+}
+.sms__bar small {
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+.sms__quiet {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: rgba(230, 196, 109, 0.08);
+}
+.sms__thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 340px;
+  min-height: 160px;
+  padding: 12px;
+  overflow-y: auto;
+}
+.sms__row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 86%;
+}
+.sms__row--app {
+  align-self: flex-start;
+}
+.sms__row--me {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+.sms__stage {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.sms__bubble {
+  padding: 9px 12px;
+  border-radius: 18px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.sms__bubble--app {
+  background: #1f2a3a;
+  border-bottom-left-radius: 6px;
+}
+.sms__bubble--me {
+  background: var(--blue);
+  color: #0c1522;
+  border-bottom-right-radius: 6px;
+}
+.sms__time {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.sms__typing {
+  display: flex;
+  gap: 4px;
+  padding: 12px 14px;
+}
+.sms__typing i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  animation: sms-dot 1s infinite ease-in-out;
+}
+.sms__typing i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.sms__typing i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes sms-dot {
+  0%, 80%, 100% { opacity: 0.3; }
+  40% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sms__typing i {
+    animation: none;
+  }
+}
+.sms__actions {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}

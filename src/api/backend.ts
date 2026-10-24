@@ -52,11 +52,12 @@ export function askConcierge(
   locationId: string,
   scenario: Scenario,
   question: string,
+  history: { role: "user" | "assistant"; text: string }[] = [],
   signal?: AbortSignal,
 ): Promise<ChatResponse> {
   return call<ChatResponse>("/chat", {
     method: "POST",
-    body: JSON.stringify({ location_id: locationId, question, scenario }),
+    body: JSON.stringify({ location_id: locationId, question, scenario, history }),
     signal,
   });
 }

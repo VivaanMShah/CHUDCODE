@@ -250,3 +250,16 @@
   font-size: 12.5px;
   line-height: 1.45;
 }
+
+/* ---- Optional early prep (no storm) ---- */
+.optional {
+  margin-top: 12px;
+}
+.optional summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--blue);
+}
+.optional .card {
+  margin-top: 10px;
+}

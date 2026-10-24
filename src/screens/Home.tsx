@@ -31,7 +31,7 @@ const DEVICE_LABEL: Record<string, string> = {
 
 export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
   const { location, openPicker } = useLocation();
-  const { scenario, updateScenario, resetScenario, live, useLive, setUseLive, data, savedAt, loading, error, retry } =
+  const { scenario, updateScenario, resetScenario, live, useLive, setUseLive, data, quiet, savedAt, loading, error, retry } =
     useAssessment();
   const [simulating, setSimulating] = useState(false);
 
@@ -106,11 +106,15 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
               <section className="card fallback" role="status">
                 <h2 className="fallback__title">We can't predict this reliably right now</h2>
                 <p className="fallback__reason">{meta.fallback_reason}</p>
-                <span className="fallback__label">What to do anyway</span>
-                <ul className="fallback__list">
-                  {data.customer_actions.safety_messages.slice(0, 2).map((m) => <li key={m}>{m}</li>)}
-                  <li>Charge phones and keep a flashlight handy.</li>
-                </ul>
+                {!quiet && (
+                  <>
+                    <span className="fallback__label">What to do anyway</span>
+                    <ul className="fallback__list">
+                      {data.customer_actions.safety_messages.slice(0, 2).map((m) => <li key={m}>{m}</li>)}
+                      <li>Charge phones and keep a flashlight handy.</li>
+                    </ul>
+                  </>
+                )}
               </section>
             )}
 
@@ -161,7 +165,17 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
               {loading && <span className="hero__updating">Updating…</span>}
             </section>
 
-            {/* Alert eligibility + next steps */}
+            {/* Alert eligibility + next steps. With no storm, say so and stop. */}
+            {quiet ? (
+              <section className="card quiet-card">
+                <strong>All clear</strong>
+                <p>No storm is expected, so there is nothing you need to do right now. We'll tell you if that changes.</p>
+                <div className="row-links">
+                  <button type="button" className="link" onClick={onOpenAlerts}>Text alerts</button>
+                  <button type="button" className="link" onClick={openSheet}>About you</button>
+                </div>
+              </section>
+            ) : (
             <section className="card">
               <div className="qualify">
                 <span className={`qualify__icon${est.alert_eligible ? " is-on" : ""}`} aria-hidden>
@@ -182,6 +196,7 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
                 <button type="button" className="link" onClick={openSheet}>About you</button>
               </div>
             </section>
+            )}
           </>
         )}
 
