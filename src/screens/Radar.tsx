@@ -173,8 +173,8 @@ export default function Radar() {
               : "Tap the map for conditions at a spot, or tap a pin for details."}
           </p>
           <p className="radar__caption">
-            Rain and wind are drawn from the hourly forecast. They are not live radar imagery. Map by OpenStreetMap and CARTO,
-            and nearby places from OpenStreetMap. Your browser contacts them with your ZIP's area, never your exact location.{" "}
+            Rain and wind are drawn from the hourly forecast. They are not live radar imagery. Map by the U.S. Geological Survey,
+            nearby places from OpenStreetMap. Your browser contacts them with your ZIP's area, never your exact location.{" "}
             <a href={nwsForecast(zip)} target="_blank" rel="noopener noreferrer">National Weather Service forecast</a>
           </p>
         </section>

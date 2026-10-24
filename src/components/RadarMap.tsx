@@ -87,9 +87,10 @@ const RadarMap = forwardRef<RadarMapHandle, Props>(function RadarMap(props, ref)
     const { lat, lon } = latest.current.center;
     const cos = Math.cos((lat * Math.PI) / 180);
     const m = L.map(el, { center: [lat, lon], zoom: 9, minZoom: 6, maxZoom: 14 });
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      subdomains: "abcd", maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    // U.S. Geological Survey topographic map: free, no key, public domain.
+    L.tileLayer("https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}", {
+      maxNativeZoom: 16, maxZoom: 19,
+      attribution: 'Map: <a href="https://www.usgs.gov/programs/national-geospatial-program/national-map">U.S. Geological Survey</a>',
     }).addTo(m);
     const dLat = RANGE_MI / 69;
     const dLon = RANGE_MI / (69 * cos);
