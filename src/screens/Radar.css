@@ -1,0 +1,471 @@
+/* ==========================================================================
+   Radar screen
+   ========================================================================== */
+
+/* ---- Header ---- */
+.radar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.radar__header h1 {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.radar__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* ---- Layer tabs ---- */
+.radar__layers {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.radar__layer {
+  padding: 8px 4px;
+  border-radius: 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.radar__layer:hover {
+  color: var(--text);
+}
+
+.radar__layer.is-active {
+  background: var(--blue-soft);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(76, 141, 255, 0.55);
+}
+
+/* ---- Legend ---- */
+.radar__legend {
+  padding: 10px 14px 12px;
+}
+
+.radar__legend-bar {
+  height: 5px;
+  margin: 10px 0 6px;
+  border-radius: 999px;
+}
+
+.radar__legend-bar--rain {
+  background: linear-gradient(90deg, #3ccf91, #f5d43d 45%, #f08a3c 75%, #ef4b4b);
+}
+.radar__legend-bar--lightning {
+  background: linear-gradient(90deg, rgba(245, 184, 61, 0.2), #f5b83d 55%, #fff2a8);
+}
+.radar__legend-bar--wind {
+  background: linear-gradient(90deg, rgba(76, 141, 255, 0.25), #4c8dff 55%, #7fe3ff);
+}
+.radar__legend-bar--clouds {
+  background: linear-gradient(90deg, rgba(159, 176, 200, 0.2), #9fb0c8 55%, #dbe4f2);
+}
+
+.radar__legend-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* ---- Map ---- */
+.radar__map {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(76, 141, 255, 0.08), transparent 70%),
+    #0a1020;
+}
+
+.radar__map svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.radar__ring-label {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  fill: rgba(255, 255, 255, 0.4);
+}
+
+/* ---- Time / playback ---- */
+.radar__time {
+  padding: 12px 14px;
+}
+
+.radar__time-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.radar__time-now {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.radar__time-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.radar__play {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.05);
+  transition: background 0.15s ease;
+}
+
+.radar__play:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.radar__segments {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+}
+
+.radar__segment {
+  flex: 1;
+  height: 14px;
+  position: relative;
+}
+
+/* The visible bar is thin; the button itself is taller so it's easy to tap */
+.radar__segment::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  transition: background 0.15s ease;
+}
+
+.radar__segment:hover::before {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.radar__segment.is-active::before {
+  background: var(--blue);
+  box-shadow: 0 0 8px rgba(76, 141, 255, 0.6);
+}
+
+.radar__time-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding-left: 48px; /* lines the labels up under the segment bar */
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* ==========================================================================
+   Evacuation traffic light + nearby help
+   ========================================================================== */
+
+/* ---- "Your area" banner and tapped-zone panel ---- */
+.radar__status,
+.radar__detail {
+  --zone-color: var(--blue);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.radar__status {
+  border-color: var(--zone-color);
+  background: color-mix(in srgb, var(--zone-color) 14%, transparent);
+}
+
+.radar__status > div,
+.radar__detail-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.radar__status strong,
+.radar__detail strong {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+
+.radar__status p,
+.radar__detail p {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+/* The glowing "traffic light" dot */
+.radar__status-light {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: 50%;
+  background: var(--zone-color);
+  box-shadow: 0 0 12px var(--zone-color);
+}
+
+.radar__detail-close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -4px -6px 0 0;
+  border-radius: 50%;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--text-dim);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.radar__detail-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+
+.radar__detail-call {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--blue-soft);
+  border: 1px solid rgba(76, 141, 255, 0.5);
+  color: #b9d2ff;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.radar__detail-call:hover {
+  background: rgba(76, 141, 255, 0.28);
+}
+
+/* ---- Overlay toggle chips ---- */
+.radar__toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.toggle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-faint);
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.toggle-chip:hover {
+  color: var(--text-dim);
+}
+
+.toggle-chip.is-on {
+  border-color: rgba(76, 141, 255, 0.6);
+  background: var(--blue-soft);
+  color: var(--text);
+}
+
+.toggle-chip__swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  opacity: 0.55;
+}
+
+.toggle-chip.is-on .toggle-chip__swatch {
+  opacity: 1;
+}
+
+.toggle-chip__swatch--evac {
+  background: linear-gradient(135deg, #2fbf71, #f5d43d 45%, #ef4b4b);
+}
+
+.toggle-chip__swatch--help {
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 3px #e53935;
+}
+
+/* ---- Map shapes (these are SVG elements) ---- */
+.radar__zone,
+.radar__place {
+  cursor: pointer;
+  outline: none;
+}
+
+.radar__zone:focus-visible,
+.radar__place:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.radar__zone polygon {
+  transition: fill-opacity 0.15s ease;
+}
+
+.radar__zone:hover polygon:first-child {
+  fill-opacity: 0.42;
+}
+
+.radar__zone-label {
+  font-size: 7.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  fill: #ffffff;
+  stroke: rgba(5, 8, 15, 0.85);
+  stroke-width: 2.5px;
+  paint-order: stroke;
+  pointer-events: none;
+}
+
+.radar__you-label {
+  font-size: 8px;
+  font-weight: 800;
+  text-anchor: middle;
+  fill: #ffffff;
+}
+
+/* Soft pulse that rings out from the user's dot */
+.radar__user-pulse {
+  fill: none;
+  stroke: #4c8dff;
+  stroke-width: 1.5px;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: user-pulse 2.2s ease-out infinite;
+}
+
+@keyframes user-pulse {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radar__user-pulse {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/* ---- Legend card for evacuation colors + icons ---- */
+.radar__key {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.radar__key-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgb(47, 191, 113),
+    rgb(245, 212, 61) 35%,
+    rgb(240, 138, 60) 70%,
+    rgb(239, 75, 75)
+  );
+}
+
+.radar__key-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.radar__key-icons {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 10px 0 0;
+  border-top: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+
+.radar__key-icons li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text);
+}
+
+.radar__key-icons svg {
+  flex: none;
+}
+
+.radar__key-note {
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+.radar__warn {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(245, 184, 61, 0.4);
+  background: rgba(245, 184, 61, 0.1);
+  font-size: 12px;
+  color: #f7d58a;
+}

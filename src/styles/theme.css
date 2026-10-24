@@ -1,0 +1,225 @@
+/* ==========================================================================
+   Nubus — theme.css
+   Global tokens, reset, app frame, and small shared utility classes.
+   ========================================================================== */
+
+:root {
+  /* Surfaces */
+  --bg-0: #070c16;
+  --bg-1: #0b1220;
+  --bg-2: #101a2c;
+  --card: rgba(255, 255, 255, 0.035);
+  --card-solid: #111b2e;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* Text */
+  --text: #f1f5fb;
+  --text-dim: #aab6c8;
+  --text-faint: #6f7d93;
+
+  /* Accents */
+  --blue: #4c8dff;
+  --blue-soft: rgba(76, 141, 255, 0.16);
+  --yellow: #f5b83d;
+  --orange: #f08a3c;
+  --red: #ef4b4b;
+  --red-soft: rgba(239, 75, 75, 0.14);
+  --green: #3ccf91;
+
+  /* Severity colors (used by alerts / badges) */
+  --warning: var(--red);
+  --watch: var(--orange);
+  --advisory: var(--blue);
+
+  /* Typography */
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Shape */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+
+  /* Layout */
+  --app-width: 420px;
+  --nav-height: 68px;
+  --gutter: 16px;
+}
+
+/* ---- Reset ---- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #05080f;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+/* ---- App frame: a centered phone-width column on desktop ---- */
+.app {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: var(--app-width);
+  height: 100%;
+  margin: 0 auto;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 40% at 50% 100%, rgba(150, 50, 60, 0.22), transparent 70%),
+    radial-gradient(90% 30% at 20% 0%, rgba(76, 141, 255, 0.08), transparent 70%),
+    linear-gradient(180deg, var(--bg-1), var(--bg-0));
+}
+
+@media (min-width: 480px) {
+  .app {
+    height: min(100%, 900px);
+    margin-top: max(0px, calc((100% - 900px) / 2));
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+}
+
+/* Scrollable area above the bottom nav */
+.screen {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px var(--gutter) calc(var(--nav-height) + 20px);
+  scrollbar-width: none;
+}
+.screen::-webkit-scrollbar {
+  display: none;
+}
+
+/* ---- Shared building blocks ---- */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.dim {
+  color: var(--text-dim);
+}
+
+.faint {
+  color: var(--text-faint);
+}
+
+/* Screen title row (Radar, Alerts, Storm tracker) */
+.screen-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.screen-header h1 {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.screen-header p {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* Pill badges: WARNING / WATCH / ADVISORY / High */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.badge--warning {
+  color: #ff7a6b;
+  background: rgba(239, 75, 75, 0.1);
+}
+.badge--watch {
+  color: var(--orange);
+}
+.badge--advisory {
+  color: #7fb0ff;
+}
+.badge--high {
+  color: #ff7a6b;
+  background: rgba(239, 75, 75, 0.1);
+  font-family: var(--font-sans);
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* Live indicator dot */
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}

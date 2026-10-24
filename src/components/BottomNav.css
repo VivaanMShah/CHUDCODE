@@ -1,0 +1,68 @@
+/* ==========================================================================
+   BottomNav — fixed tab bar pinned to the bottom of the app frame
+   ========================================================================== */
+
+.bottom-nav {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  height: var(--nav-height);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: rgba(8, 13, 24, 0.92);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid var(--border);
+}
+
+.bottom-nav__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--text-faint);
+  transition: color 0.15s ease;
+}
+
+.bottom-nav__item:hover {
+  color: var(--text-dim);
+}
+
+.bottom-nav__item.is-active {
+  color: var(--blue);
+}
+
+.bottom-nav__icon {
+  position: relative;
+  display: inline-flex;
+}
+
+.bottom-nav__label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* Red alert-count badge on the Alerts icon */
+.bottom-nav__badge {
+  position: absolute;
+  top: -6px;
+  right: -9px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--red);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  border: 1.5px solid var(--bg-1);
+}

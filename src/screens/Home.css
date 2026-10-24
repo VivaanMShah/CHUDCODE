@@ -1,0 +1,280 @@
+/* ==========================================================================
+   Home screen
+   ========================================================================== */
+
+/* ---- Header ---- */
+.home__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.home__header > div:first-child {
+  min-width: 0; /* lets a long place name shrink instead of pushing the temperature off-screen */
+}
+
+.home__heading {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+/* Tappable location label: pin + place name + chevron */
+.home__location {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 8px 4px 6px;
+  margin: -4px 0 0 -6px;
+  border-radius: 10px;
+  color: var(--text);
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.home__location:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.home__location svg {
+  flex: none;
+  color: var(--blue);
+}
+
+.home__location-chevron {
+  color: var(--text-dim) !important;
+}
+
+.home__city {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.home__updated {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.home__temp {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.home__temp-value {
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.home__temp-label {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ---- Alert banner ---- */
+.home-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(239, 75, 75, 0.45);
+  background: linear-gradient(90deg, rgba(239, 75, 75, 0.2), rgba(239, 75, 75, 0.08));
+  transition: background 0.15s ease;
+}
+
+.home-banner:hover {
+  background: linear-gradient(90deg, rgba(239, 75, 75, 0.28), rgba(239, 75, 75, 0.12));
+}
+
+.home-banner__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 8px var(--red);
+}
+
+.home-banner__text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.home-banner__text strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.home-banner__text span {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.home-banner__chevron {
+  flex: none;
+  color: var(--text-dim);
+}
+
+/* ---- Storm risk card ---- */
+.risk__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.risk__value {
+  margin: 10px 0 8px;
+  font-size: 56px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: #ff6a5c;
+}
+
+.risk__value span {
+  font-size: 24px;
+  font-weight: 700;
+  margin-left: 2px;
+}
+
+.risk__summary {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.risk__meter {
+  position: relative;
+  height: 14px;
+  margin-top: 18px;
+}
+
+.risk__track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 5px;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--blue) 0%,
+    var(--yellow) 45%,
+    var(--orange) 70%,
+    var(--red) 100%
+  );
+}
+
+.risk__marker {
+  position: absolute;
+  top: 0;
+  width: 3px;
+  height: 14px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.5);
+}
+
+.risk__scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* ---- Hourly chance of storms ---- */
+.chance {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.chance__col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.chance__label {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.chance__bar-area {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 56px;
+}
+
+.chance__bar {
+  width: 6px;
+  border-radius: 999px;
+  transition: height 0.4s ease;
+}
+
+.chance__percent {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* ---- Quick stats ---- */
+.home-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.2fr;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.home-stats__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+}
+
+.home-stats__item + .home-stats__item {
+  border-left: 1px solid var(--border);
+}
+
+.home-stats__label {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.home-stats__value {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.home-stats__value small {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-dim);
+  letter-spacing: 0;
+}
