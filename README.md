@@ -58,6 +58,7 @@ docker build -t outage-concierge . && docker run -p 8000:8000 outage-concierge
 | GET | `/locations` | Anonymized circuit-level areas (`LOC-001`...). The app now uses ZIPs instead |
 | POST | `/assess` | Risk, restoration range, actions, alerts |
 | POST | `/message` | Customer message for a given stage |
+| POST | `/chat` | Ask a question; answered from the estimate's facts, numbers checked |
 
 Errors: unknown `location_id` → `404`. Invalid input (for example `storm_severity: 9`, or an unknown `declared_needs` value) → `422` with field details.
 
@@ -293,7 +294,7 @@ React app in `src/`, wired to this API:
 | Alerts | Real NWS alerts, the outage alert rule and escalation, and the 4-stage message timeline with "Verified numbers" |
 | Prepare | Checklist, safety messages, downed-line guidance (demo, no reporting) |
 | About you | Optional sheet (Home, after choosing a ZIP): household, home type, well pump, electric heat, generator, power needs, preferred contact. Saved on the device only. Tailors the tips and contact line. Only power needs and backup hours are sent with an estimate |
-| Chat | Sample replies only. Reserved for the Bedrock chatbot |
+| Chat | Ask the concierge: `POST /chat`, four starter questions, answers from your estimate only |
 
 - API layer: `src/api/backend.ts`, types in `src/api/contract.ts`, contact numbers in `src/config.ts` (the power company line is the Appalachian Power Virginia outage number).
 - The last estimate is saved on the device and shown with an offline note if the backend is unreachable.
@@ -324,14 +325,52 @@ src/              React + Vite frontend
   screens/        Home, Alerts (timeline), Storm (Prepare), Radar, Chat
 ```
 
+## Hosting on AWS (ECS + ECR)
+
+One Docker image serves the website and the API. AWS builds it (this PC needs no Docker), stores it in
+ECR, and runs it on ECS Fargate behind a load balancer. The load balancer's default address is the link.
+
+```bash
+python -m deploy.deploy     # run after any change: builds, pushes, and rolls out the new version
+```
+
+What it does, in order: makes sure the AWS resources exist (safe to repeat) -> zips the source -> CodeBuild builds
+the image and pushes it to ECR -> ECS starts the new version and retires the old one (rolls back by itself if the
+new one fails its health check) -> prints the link. Takes about 5 to 8 minutes.
+
+- **Credentials:** `.env` (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`). They are never printed, never
+  put in git, and never in the image. The running app uses an IAM role, not your keys.
+- **Sandbox keys expire.** If a deploy says `ExpiredToken`, paste fresh credentials into `.env` and run it again.
+  The already-running site keeps working. If this is an Innovation Sandbox account, the lease ends and the account is wiped
+  on its expiry date, so the site goes away with it.
+- **Data:** the raw `data/` folder is not shipped. `python -m app.data` builds a 150 KB processed file
+  (`data/_cache/store.pkl`) and the deploy script puts that in the image.
+- **Resources created** (all named `outage-concierge`): a second subnet, 2 security groups, an ECR repository, an S3 bucket
+  for build sources, 2 log groups, 3 IAM roles, a CodeBuild project, a load balancer, an ECS cluster and service.
+  Cost is roughly $2 a day while running (Fargate 1 vCPU and 2 GB, plus the load balancer). To stop paying, set the
+  service's desired count to 0 or delete the resources.
+- **HTTP only.** The default load balancer address is plain `http://`. HTTPS needs a domain name and certificate, or a
+  CloudFront distribution in front.
+- **Logs:** CloudWatch group `/ecs/outage-concierge` (includes the audit log). Build logs: `/codebuild/outage-concierge`.
+- **Limits to know:** one task runs (no auto-scaling), and uvicorn's access log is off so ZIPs in URLs aren't logged.
+
+### Bedrock chatbot
+
+`POST /chat` answers from the `/assess` facts only. The model (Amazon Nova Pro by default, set `BEDROCK_MODEL_ID` to change)
+is told never to invent numbers, and every number in its reply is checked against the facts. Any mismatch (or any Bedrock
+error) falls back to a plain template answer, shown as `source: "template"`. Questions are limited to 300 characters, 20 per
+minute per visitor, and are never logged. Turn it on with `LLM_PROVIDER=bedrock` (the deployed task sets this; locally
+add it to `.env`). The same helper polishes `/message` text, with the same number check.
+
+Claude models on Bedrock need an AWS Marketplace subscription that the sandbox role cannot make (they answered once,
+then were refused), so Nova is the default.
+
 ## Roadmap
 
-Done: ZIP search, weather-driven storm strength, calmer UI, interactive forecast radar with help actions, NWS alerts.
+Done: ZIP search, weather-driven storm strength, calmer UI, interactive forecast radar with help actions, NWS alerts, About you, Bedrock chat, AWS hosting.
 
 Next:
-1. **Bedrock chatbot** (`POST /chat`): the model only rewords text from the `/assess` JSON, and the number validator checks every number. Use the Bedrock Converse API with a model id from an env var.
-2. **AWS hosting:** the API needs `data/` at runtime (about 500 MB, gitignored), so bake it into the container image or mount it from S3. Set `VITE_API_URL` for the frontend build, and tighten CORS from `*` to the frontend's origin.
-3. Load the STORMS and indirect-labor files when available (replace placeholders in `app/config.py`).
+1. Load the STORMS and indirect-labor files when available (replace placeholders in `app/config.py`).
 
 ## Built during HackOHI/O 2026
 
