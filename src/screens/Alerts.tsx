@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
-import { fetchAlerts, savePushSettings } from "api/placeholders";
-import type { AlertsData, WeatherAlert } from "../types";
+import { getMessage } from "../api/backend";
+import type { Band, MessageResponse, MessageType } from "../api/contract";
+import { CHANNEL_LABEL, bandLabel, useAssessment } from "../assessment";
+import { useLocation } from "../location";
+import type { AlertSeverity, WeatherAlert } from "../types";
 import "./Alerts.css";
 
 function Chevron({ open }: { open: boolean }) {
@@ -62,41 +65,75 @@ function AlertCard({ alert, open, onToggle }: AlertCardProps) {
   );
 }
 
+const SEVERITY: Record<Band, AlertSeverity> = {
+  high: "warning",
+  medium: "watch",
+  low: "advisory",
+};
+
+const MESSAGE_TABS: { id: MessageType; label: string }[] = [
+  { id: "pre_storm", label: "Before" },
+  { id: "outage_confirmed", label: "Outage" },
+  { id: "estimate_updated", label: "Update" },
+  { id: "restoration_complete", label: "Restored" },
+];
+
+const PUSH_KEY = "storm-watch:push";
+
+function loadPush(): boolean {
+  try {
+    return localStorage.getItem(PUSH_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
 export default function Alerts() {
-  const [data, setData] = useState<AlertsData | null>(null);
-  const [error, setError] = useState(false);
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [pushEnabled, setPushEnabled] = useState(false);
+  const { location } = useLocation();
+  const { scenario, data, error } = useAssessment();
+  const [open, setOpen] = useState(true);
+  const [pushEnabled, setPushEnabled] = useState(loadPush);
+
+  // Customer message preview (POST /message)
+  const [msgType, setMsgType] = useState<MessageType>("pre_storm");
+  const [msg, setMsg] = useState<MessageResponse | null>(null);
+  const [msgError, setMsgError] = useState(false);
+  const [preStorm, setPreStorm] = useState<string | null>(null);
+
+  const locationId = location?.locationId;
 
   useEffect(() => {
-    let cancelled = false;
-    fetchAlerts()
-      .then((d) => {
-        if (cancelled) return;
-        setData(d);
-        setPushEnabled(d.pushEnabled);
-        // Start with the most severe (first) alert expanded.
-        setOpenId(d.alerts[0]?.id ?? null);
-      })
-      .catch(() => !cancelled && setError(true));
+    if (!locationId) return;
+    const ctrl = new AbortController();
+    setMsgError(false);
+    const timer = setTimeout(() => {
+      getMessage(locationId, msgType, scenario, ctrl.signal)
+        .then((m) => {
+          setMsg(m);
+          if (m.message_type === "pre_storm") setPreStorm(m.text);
+        })
+        .catch(() => !ctrl.signal.aborted && setMsgError(true));
+    }, 150);
     return () => {
-      cancelled = true;
+      clearTimeout(timer);
+      ctrl.abort();
     };
-  }, []);
+  }, [locationId, msgType, scenario]);
 
   function handlePushToggle() {
-    if (!data) return;
     const next = !pushEnabled;
-    setPushEnabled(next); // optimistic update
-    savePushSettings(next, data.pushThresholdPercent).catch(() => {
-      setPushEnabled(!next); // roll back if the save fails
-    });
+    setPushEnabled(next);
+    try {
+      localStorage.setItem(PUSH_KEY, next ? "on" : "off");
+    } catch {
+      /* not critical */
+    }
   }
 
-  if (error) {
+  if (error && !data) {
     return (
       <div className="screen">
-        <p className="dim">Couldn't load alerts. Try again in a moment.</p>
+        <p className="dim">{error}</p>
       </div>
     );
   }
@@ -104,10 +141,23 @@ export default function Alerts() {
   if (!data) {
     return (
       <div className="screen">
-        <p className="dim">Loading alerts…</p>
+        <p className="dim">{location ? "Loading alerts…" : "Pick an area on Home first."}</p>
       </div>
     );
   }
+
+  const est = data.model_estimate;
+  const acts = data.customer_actions;
+  const alert: WeatherAlert | null = est.alert_eligible
+    ? {
+        id: "outage",
+        severity: SEVERITY[est.risk_band],
+        title: `${bandLabel(est.risk_band)} outage risk in your area`,
+        untilLabel: acts.send_timing,
+        description: preStorm ?? est.reasons.map((r) => r.text).join(" "),
+        whatToDo: acts.actions.slice(0, 3).join(" "),
+      }
+    : null;
 
   return (
     <div className="screen alerts">
@@ -115,32 +165,86 @@ export default function Alerts() {
         <div>
           <h1>Alerts</h1>
           <p>
-            {data.alerts.length} active for {data.locationName}
+            {alert ? "1 active" : "None active"} for {location?.label}
           </p>
         </div>
       </header>
 
       <div className="stack">
-        {data.alerts.length === 0 && (
+        {alert ? (
+          <AlertCard alert={alert} open={open} onToggle={() => setOpen((v) => !v)} />
+        ) : (
           <div className="card">
-            <p className="dim">No active alerts for your area right now.</p>
+            <p className="dim">No outage alert for this scenario.</p>
           </div>
         )}
 
-        {data.alerts.map((alert) => (
-          <AlertCard
-            key={alert.id}
-            alert={alert}
-            open={openId === alert.id}
-            onToggle={() => setOpenId(openId === alert.id ? null : alert.id)}
-          />
-        ))}
+        {/* Why: the rule that decided, and how we'd reach the customer */}
+        <section className="card">
+          <span className="eyebrow">Why this decision</span>
+          <ul className="alert-facts">
+            <li>
+              <span>Rule</span>
+              <strong>{est.alert_rule}</strong>
+            </li>
+            <li>
+              <span>We'd reach you by</span>
+              <strong>{CHANNEL_LABEL[acts.channel] ?? acts.channel}</strong>
+            </li>
+            <li>
+              <span>When</span>
+              <strong>{acts.send_timing}</strong>
+            </li>
+            <li>
+              <span>If things get worse</span>
+              <strong>
+                {acts.escalation.trigger}: {acts.escalation.action.toLowerCase()}
+              </strong>
+            </li>
+          </ul>
+        </section>
 
-        {/* Push notifications */}
+        {/* Customer message preview */}
+        <section className="card">
+          <span className="eyebrow">Messages we'd send</span>
+          <div className="msg-tabs" role="tablist" aria-label="Message stage">
+            {MESSAGE_TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={msgType === t.id}
+                className={`msg-tabs__item${msgType === t.id ? " is-on" : ""}`}
+                onClick={() => setMsgType(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {msgError ? (
+            <p className="dim msg__text">Couldn't load this message.</p>
+          ) : msg && msg.message_type === msgType ? (
+            <>
+              <p className="msg__text">{msg.text}</p>
+              <p className="msg__meta">
+                <span>{CHANNEL_LABEL[msg.channel] ?? msg.channel}</span>
+                <span>·</span>
+                <span>{msg.send_timing}</span>
+              </p>
+              <span className={`badge ${msg.validated ? "badge--advisory" : "badge--warning"}`}>
+                {msg.validated ? "Numbers checked against data" : "Numbers not verified"}
+              </span>
+            </>
+          ) : (
+            <p className="dim msg__text">Loading…</p>
+          )}
+        </section>
+
+        {/* Push notifications (saved on this device only) */}
         <section className="card push">
           <div className="push__text">
             <strong>Push notifications</strong>
-            <span>Notify me when storm risk passes {data.pushThresholdPercent}%</span>
+            <span>Notify me when outage risk is medium or high</span>
           </div>
           <button
             type="button"

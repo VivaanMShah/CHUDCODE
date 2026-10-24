@@ -60,7 +60,7 @@ const tabs: { id: TabId; label: string }[] = [
   { id: "home", label: "Home" },
   { id: "radar", label: "Radar" },
   { id: "alerts", label: "Alerts" },
-  { id: "storm", label: "Storm" },
+  { id: "storm", label: "Prepare" },
   { id: "chat", label: "Chat" },
 ];
 

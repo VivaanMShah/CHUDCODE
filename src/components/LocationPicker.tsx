@@ -1,26 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { searchLocations } from "api/placeholders";
+import { getLocations } from "../api/backend";
 import { useLocation } from "../location";
 import type { LocationSuggestion } from "../types";
 import "./LocationPicker.css";
 
-// Full-screen sheet (inside the phone-width app frame) where the user chooses
-// their location: type a city, or tap "Use my current location".
+// Full-screen sheet (inside the phone-width app frame) where the user picks
+// their area from the backend's anonymized area list (GET /locations).
 export default function LocationPicker() {
-  const {
-    location,
-    pickerOpen,
-    closePicker,
-    setFromSuggestion,
-    useMyLocation,
-    gpsStatus,
-    gpsError,
-  } = useLocation();
+  const { location, pickerOpen, closePicker, setFromSuggestion } = useLocation();
 
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<LocationSuggestion[]>([]);
+  const [areas, setAreas] = useState<LocationSuggestion[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Focus the search box whenever the sheet opens; reset it when it closes.
@@ -29,39 +22,38 @@ export default function LocationPicker() {
       inputRef.current?.focus();
     } else {
       setQuery("");
-      setResults([]);
-      setSearchError(false);
     }
   }, [pickerOpen]);
 
-  // Search as the user types, waiting 250ms after the last keystroke.
+  // Load the area list from the backend when the sheet opens.
   useEffect(() => {
-    const q = query.trim();
-    if (q.length < 2) {
-      setResults([]);
-      setSearching(false);
-      setSearchError(false);
-      return;
-    }
-
+    if (!pickerOpen || areas) return;
     let cancelled = false;
     setSearching(true);
-    const timer = setTimeout(() => {
-      searchLocations(q)
-        .then((r) => {
-          if (cancelled) return;
-          setResults(r);
-          setSearchError(false);
-        })
-        .catch(() => !cancelled && setSearchError(true))
-        .finally(() => !cancelled && setSearching(false));
-    }, 250);
-
+    getLocations()
+      .then((r) => {
+        if (cancelled) return;
+        setAreas(
+          r.locations.map((l) => ({
+            id: l.location_id,
+            label: l.label,
+            customersServedBand: l.customers_served_band,
+            hasStormHistory: l.has_storm_history,
+          })),
+        );
+        setSearchError(false);
+      })
+      .catch(() => !cancelled && setSearchError(true))
+      .finally(() => !cancelled && setSearching(false));
     return () => {
       cancelled = true;
-      clearTimeout(timer);
     };
-  }, [query]);
+  }, [pickerOpen, areas, attempt]);
+
+  const trimmed = query.trim().toLowerCase();
+  const results = (areas ?? []).filter(
+    (a) => !trimmed || a.label.toLowerCase().includes(trimmed) || a.id.toLowerCase().includes(trimmed),
+  );
 
   // Escape closes the sheet (only allowed once a location exists).
   useEffect(() => {
@@ -76,9 +68,7 @@ export default function LocationPicker() {
   if (!pickerOpen) return null;
 
   const canClose = location !== null;
-  const trimmed = query.trim();
-  const showEmpty =
-    trimmed.length >= 2 && !searching && !searchError && results.length === 0;
+  const showEmpty = areas !== null && results.length === 0;
 
   return (
     <div
@@ -91,12 +81,12 @@ export default function LocationPicker() {
         <header className="picker__header">
           <div>
             <h2 id="picker-title">
-              {canClose ? "Change location" : "Where are you?"}
+              {canClose ? "Change area" : "Pick your area"}
             </h2>
             <p>
               {canClose
                 ? `Currently: ${location.label}`
-                : "We use your location to show storms, alerts and safe places near you."}
+                : "We use your area to estimate outage risk and how long repairs may take."}
             </p>
           </div>
           {canClose && (
@@ -122,41 +112,6 @@ export default function LocationPicker() {
           )}
         </header>
 
-        {/* Use GPS */}
-        <button
-          type="button"
-          className="picker__gps"
-          onClick={useMyLocation}
-          disabled={gpsStatus === "locating"}
-        >
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-          >
-            <circle cx="12" cy="12" r="3.2" />
-            <circle cx="12" cy="12" r="7.5" />
-            <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
-          </svg>
-          {gpsStatus === "locating" ? "Finding you…" : "Use my current location"}
-        </button>
-
-        {gpsError && (
-          <p className="picker__error" role="alert">
-            {gpsError}
-          </p>
-        )}
-
-        <div className="picker__divider">
-          <span>or search</span>
-        </div>
-
         {/* Search */}
         <label className="picker__search">
           <svg
@@ -177,21 +132,24 @@ export default function LocationPicker() {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="City, ZIP or address"
+            placeholder="Search areas, e.g. Roanoke or Salem"
             autoComplete="off"
-            aria-label="Search for a location"
+            aria-label="Search for an area"
           />
         </label>
 
         <ul className="picker__results" aria-live="polite">
-          {searching && <li className="picker__note">Searching…</li>}
+          {searching && <li className="picker__note">Loading areas…</li>}
           {searchError && (
             <li className="picker__note picker__note--error">
-              Search failed. Check your connection and try again.
+              Couldn't load areas. Check that the backend is running.{" "}
+              <button type="button" className="picker__retry" onClick={() => setAttempt((n) => n + 1)}>
+                Try again
+              </button>
             </li>
           )}
           {showEmpty && (
-            <li className="picker__note">No matches for “{trimmed}”.</li>
+            <li className="picker__note">No areas match “{query.trim()}”.</li>
           )}
           {results.map((r) => (
             <li key={r.id}>
@@ -214,7 +172,13 @@ export default function LocationPicker() {
                   <path d="M12 21s-7-6.2-7-11.2A7 7 0 0 1 19 9.8C19 14.8 12 21 12 21Z" />
                   <circle cx="12" cy="9.8" r="2.4" />
                 </svg>
-                <span>{r.label}</span>
+                <span className="picker__result-text">
+                  <span>{r.label}</span>
+                  <small>
+                    Serves {r.customersServedBand} customers
+                    {r.hasStormHistory ? "" : " · no storm history"}
+                  </small>
+                </span>
               </button>
             </li>
           ))}

@@ -3,8 +3,7 @@ import {
   fetchEvacZones,
   fetchRadar,
   fetchSafetyPlaces,
-} from "api/placeholders";
-import { useLocation } from "../location";
+} from "../api/samples";
 import type {
   EvacData,
   EvacStatus,
@@ -192,9 +191,6 @@ function PlaceIcon({ kind, size = 18 }: { kind: SafetyPlaceKind; size?: number }
 type Selection = { type: "zone" | "place"; id: string } | null;
 
 export default function Radar() {
-  const { coords } = useLocation();
-  const lat = coords?.lat;
-  const lon = coords?.lon;
 
   const [data, setData] = useState<RadarData | null>(null);
   const [places, setPlaces] = useState<SafetyPlace[]>([]);
@@ -214,11 +210,9 @@ export default function Radar() {
   // is required; if places or zones fail, the radar still works.
   useEffect(() => {
     let cancelled = false;
-    const c = lat !== undefined && lon !== undefined ? { lat, lon } : undefined;
-
     setData(null);
     setError(false);
-    Promise.allSettled([fetchRadar(c), fetchSafetyPlaces(c), fetchEvacZones(c)]).then(
+    Promise.allSettled([fetchRadar(), fetchSafetyPlaces(), fetchEvacZones()]).then(
       ([radar, safety, zones]) => {
         if (cancelled) return;
         if (radar.status === "rejected") {
@@ -236,7 +230,7 @@ export default function Radar() {
     return () => {
       cancelled = true;
     };
-  }, [lat, lon]);
+  }, []);
 
   // Playback loop: advance a frame every 700ms, wrapping around.
   useEffect(() => {
@@ -281,12 +275,12 @@ export default function Radar() {
       {/* Header */}
       <header className="radar__header">
         <h1>Radar</h1>
-        {data.isLive && (
-          <span className="radar__live">
-            <span className="dot" /> Live · {data.updatedAt}
-          </span>
-        )}
+        <span className="sample-tag">Sample data</span>
       </header>
+      <p className="sample-note">
+        Weather radar, evacuation zones, and places are design samples. They are not connected to
+        the outage backend.
+      </p>
 
       <div className="stack">
         {/* Your area: the traffic light for where the user is right now */}

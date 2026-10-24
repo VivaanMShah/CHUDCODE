@@ -1,44 +1,42 @@
 import { useEffect, useState } from "react";
-import { fetchStormTrack, savePrepItem } from "api/placeholders";
-import type { PrepItem, StormTrack } from "../types";
+import { formatRange, useAssessment } from "../assessment";
+import { useLocation } from "../location";
 import "./Storm.css";
 
+// Prepare tab: the backend's prep actions as a checklist, plus safety messages.
+// Checkmarks are saved on this device only.
+const DONE_KEY = "storm-watch:prep-done";
+
+function loadDone(): string[] {
+  try {
+    const raw = localStorage.getItem(DONE_KEY);
+    const v: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function Storm() {
-  const [data, setData] = useState<StormTrack | null>(null);
-  const [error, setError] = useState(false);
-  const [prepare, setPrepare] = useState<PrepItem[]>([]);
+  const { location } = useLocation();
+  const { data, error } = useAssessment();
+  const [done, setDone] = useState<string[]>(loadDone);
 
   useEffect(() => {
-    let cancelled = false;
-    fetchStormTrack()
-      .then((d) => {
-        if (cancelled) return;
-        setData(d);
-        setPrepare(d.prepare);
-      })
-      .catch(() => !cancelled && setError(true));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    try {
+      localStorage.setItem(DONE_KEY, JSON.stringify(done));
+    } catch {
+      /* not critical */
+    }
+  }, [done]);
 
-  function togglePrep(id: string) {
-    const item = prepare.find((p) => p.id === id);
-    if (!item) return;
-    const done = !item.done;
-    // Optimistic update, roll back if the save fails.
-    setPrepare((list) => list.map((p) => (p.id === id ? { ...p, done } : p)));
-    savePrepItem(id, done).catch(() => {
-      setPrepare((list) =>
-        list.map((p) => (p.id === id ? { ...p, done: !done } : p)),
-      );
-    });
-  }
+  const toggle = (label: string) =>
+    setDone((d) => (d.includes(label) ? d.filter((x) => x !== label) : [...d, label]));
 
-  if (error) {
+  if (error && !data) {
     return (
       <div className="screen">
-        <p className="dim">Couldn't load the storm track. Try again in a moment.</p>
+        <p className="dim">{error}</p>
       </div>
     );
   }
@@ -46,109 +44,69 @@ export default function Storm() {
   if (!data) {
     return (
       <div className="screen">
-        <p className="dim">Loading storm track…</p>
+        <p className="dim">{location ? "Loading your prep list…" : "Pick an area on Home first."}</p>
       </div>
     );
   }
 
-  const doneCount = prepare.filter((p) => p.done).length;
+  const { actions, safety_messages } = data.customer_actions;
+  const range = data.model_estimate.restoration_range;
+  const doneCount = actions.filter((a) => done.includes(a)).length;
 
   return (
     <div className="screen storm">
       <header className="screen-header">
         <div>
-          <h1>Storm tracker</h1>
+          <h1>Get ready</h1>
           <p>
-            {data.cellName} · {data.cellType}
+            For {location?.label} · outages here could last{" "}
+            {formatRange(range.low_hours, range.high_hours)}
           </p>
         </div>
       </header>
 
       <div className="stack">
-        {/* Estimated arrival */}
-        <section className="card eta">
-          <span className="eyebrow">Estimated arrival</span>
-          <div className="eta__time">{data.etaLabel}</div>
-          <p className="eta__sub">
-            {data.etaRelative} · updated {data.updatedAgo}
-          </p>
-
-          <div className="eta__stats">
-            <div className="eta__stat">
-              <span className="eta__stat-value">
-                {data.speedMph}
-                <small> mph</small>
-              </span>
-              <span className="eta__stat-label">Moving {data.heading}</span>
-            </div>
-            <div className="eta__stat">
-              <span className="eta__stat-value">
-                {data.hailInches.toFixed(1)}
-                <small> in</small>
-              </span>
-              <span className="eta__stat-label">Hail possible</span>
-            </div>
-            <div className="eta__stat">
-              <span className="eta__stat-value">
-                {data.peakGustMph}
-                <small> mph</small>
-              </span>
-              <span className="eta__stat-label">Peak gusts</span>
-            </div>
-          </div>
-        </section>
-
-        {/* Projected path */}
-        <section className="card">
-          <span className="eyebrow">Projected path</span>
-          <ol className="path">
-            {data.path.map((stop) => (
-              <li key={stop.id} className={`path__stop path__stop--${stop.status}`}>
-                <span className="path__marker" aria-hidden />
-                <span className="path__label">{stop.label}</span>
-                <span className="path__time mono">{stop.timeLabel}</span>
-              </li>
-            ))}
-          </ol>
-        </section>
-
-        {/* Prepare checklist */}
         <section className="card">
           <div className="prep__top">
             <span className="eyebrow">Prepare</span>
             <span className="prep__count">
-              {doneCount} of {prepare.length} done
+              {doneCount} of {actions.length} done
             </span>
           </div>
           <ul className="prep__list">
-            {prepare.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  role="checkbox"
-                  aria-checked={item.done}
-                  className={`prep__item${item.done ? " is-done" : ""}`}
-                  onClick={() => togglePrep(item.id)}
-                >
-                  <span className="prep__box" aria-hidden>
-                    {item.done && (
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="3.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="m5 12.5 4.5 4.5L19 7.5" />
-                      </svg>
-                    )}
-                  </span>
-                  <span className="prep__label">{item.label}</span>
-                </button>
-              </li>
+            {actions.map((label) => {
+              const isDone = done.includes(label);
+              return (
+                <li key={label}>
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={isDone}
+                    className={`prep__item${isDone ? " is-done" : ""}`}
+                    onClick={() => toggle(label)}
+                  >
+                    <span className="prep__box" aria-hidden>
+                      {isDone && (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                          stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"
+                          strokeLinejoin="round">
+                          <path d="m5 12.5 4.5 4.5L19 7.5" />
+                        </svg>
+                      )}
+                    </span>
+                    <span className="prep__label">{label}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+
+        <section className="card">
+          <span className="eyebrow">Stay safe</span>
+          <ul className="safety-list">
+            {safety_messages.map((m) => (
+              <li key={m}>{m}</li>
             ))}
           </ul>
         </section>

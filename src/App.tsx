@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
-import { fetchAlerts } from "api/placeholders";
+import { useState } from "react";
+import { AssessmentProvider, useAssessment } from "./assessment";
 import BottomNav from "./components/BottomNav";
 import LocationPicker from "./components/LocationPicker";
-import { LocationProvider, useLocation } from "./location";
+import { LocationProvider } from "./location";
 import Alerts from "./screens/Alerts";
 import Chat from "./screens/Chat";
 import Home from "./screens/Home";
@@ -10,30 +10,12 @@ import Radar from "./screens/Radar";
 import Storm from "./screens/Storm";
 import type { TabId } from "./types";
 
-// The shell lives inside <LocationProvider> so it can read the user's location.
+// The shell lives inside both providers so every tab shares the same area,
+// scenario, and backend assessment.
 function AppShell() {
-  const { coords } = useLocation();
-  const lat = coords?.lat;
-  const lon = coords?.lon;
-
   const [tab, setTab] = useState<TabId>("home");
-  const [alertCount, setAlertCount] = useState(0);
-
-  // Load the alert count so the red badge on the nav is correct, and reload
-  // it when the user changes location. TODO: also refresh on an interval, or
-  // push updates from your backend (websocket / server-sent events).
-  useEffect(() => {
-    let cancelled = false;
-    const c = lat !== undefined && lon !== undefined ? { lat, lon } : undefined;
-    fetchAlerts(c)
-      .then((d) => !cancelled && setAlertCount(d.alerts.length))
-      .catch(() => {
-        /* badge simply stays hidden if this fails */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [lat, lon]);
+  const { data } = useAssessment();
+  const alertCount = data?.model_estimate.alert_eligible ? 1 : 0;
 
   return (
     <div className="app">
@@ -54,7 +36,9 @@ function AppShell() {
 export default function App() {
   return (
     <LocationProvider>
-      <AppShell />
+      <AssessmentProvider>
+        <AppShell />
+      </AssessmentProvider>
     </LocationProvider>
   );
 }

@@ -278,3 +278,261 @@
   color: var(--text-dim);
   letter-spacing: 0;
 }
+/* ==========================================================================
+   Outage concierge additions (backend-driven)
+   ========================================================================== */
+
+.home__mode {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.home__mode.is-live {
+  color: var(--green);
+  border-color: rgba(60, 207, 145, 0.4);
+}
+
+/* ---- Scenario controls ---- */
+.scenario {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.scenario__reset {
+  font-size: 11px;
+  color: var(--blue);
+}
+
+.scenario__row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scenario__row--inline {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.scenario__label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.scenario__row--inline .scenario__label,
+.scenario__row:last-child .scenario__label {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.scenario__label strong {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.scenario__label small {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.scenario input[type="range"] {
+  width: 100%;
+  accent-color: var(--blue);
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.segmented__item {
+  padding: 7px 0;
+  border-radius: 8px;
+  font-weight: 600;
+  color: var(--text-dim);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.segmented__item.is-on {
+  background: var(--blue);
+  color: #fff;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.chip.is-on {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+  color: var(--text);
+}
+
+/* ---- Banners ---- */
+.home-banner--fallback {
+  border-color: rgba(245, 184, 61, 0.45);
+  background: linear-gradient(90deg, rgba(245, 184, 61, 0.18), rgba(245, 184, 61, 0.06));
+  cursor: default;
+}
+.home-banner--fallback:hover {
+  background: linear-gradient(90deg, rgba(245, 184, 61, 0.18), rgba(245, 184, 61, 0.06));
+}
+.home-banner--fallback .home-banner__dot {
+  background: var(--yellow);
+  box-shadow: 0 0 8px var(--yellow);
+}
+
+.card.is-muted {
+  opacity: 0.7;
+}
+
+/* ---- Risk card ---- */
+.risk__value--low {
+  color: #7fb0ff;
+}
+.risk__value--medium {
+  color: var(--yellow);
+}
+.risk__value--high {
+  color: #ff6a5c;
+}
+
+.reasons {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.reasons__item {
+  display: flex;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.reasons__item > span:first-child {
+  flex: none;
+  font-size: 9px;
+  margin-top: 4px;
+}
+.reasons__item--increases_risk > span:first-child {
+  color: var(--red);
+}
+.reasons__item--decreases_risk > span:first-child {
+  color: var(--green);
+}
+
+.confidence {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ---- Restoration ---- */
+.restore__range {
+  margin: 10px 0 6px;
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.restore__sub {
+  font-size: 12px;
+}
+
+.deltas {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+.deltas__item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.deltas__item:last-child {
+  border-bottom: 0;
+}
+.deltas__range {
+  text-align: right;
+  font-size: 11.5px;
+}
+.deltas__text {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.deltas__text.is-faster {
+  color: var(--green);
+}
+.deltas__text.is-slower {
+  color: var(--orange);
+}
+
+/* ---- Utility records ---- */
+.facts {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.facts--area {
+  color: var(--text-dim);
+}
+.facts__empty {
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+
+/* ---- About this estimate ---- */
+.about__toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  font-size: 11px;
+}
+.about {
+  margin-top: 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+.about h3 {
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+}
+.about ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+.about__id {
+  margin-top: 10px;
+  font-size: 10px;
+}

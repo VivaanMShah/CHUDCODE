@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { sendChatMessage } from "api/placeholders";
+import { sendChatMessage } from "../api/samples";
 import { useLocation } from "../location";
 import type { ChatMessage } from "../types";
 import "./Chat.css";
@@ -92,7 +92,7 @@ export default function Chat() {
       <header className="chat__header">
         <div>
           <h1>Weather assistant</h1>
-          <p>{location ? `Answers for ${location.label}` : "Set a location for local answers"}</p>
+          <p>Sample replies · not connected to the backend yet</p>
         </div>
       </header>
 

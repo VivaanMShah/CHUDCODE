@@ -1,28 +1,29 @@
 // ============================================================================
 // Nubus — shared types
-// These describe the data the UI expects. Your backend should return objects
-// matching these shapes (see src/api/placeholders.ts).
+// UI-side shapes. Backend response shapes live in src/api/contract.ts;
+// weather shapes below are only used by the sample screens (src/api/samples.ts).
 // ============================================================================
 
 export type TabId = "home" | "radar" | "alerts" | "storm" | "chat";
 
 // ---- User location ----------------------------------------------------------
 
-export type LocationSource = "gps" | "search" | "saved";
+export type LocationSource = "search" | "saved";
 
+// The user's area. Areas come from the backend's GET /locations and are
+// anonymized: an ID and a label, never coordinates.
 export interface UserLocation {
-  label: string; // "Columbus, OH"
-  lat: number;
-  lon: number;
+  label: string; // "Roanoke area 12"
+  locationId: string; // "LOC-012"
   source: LocationSource;
 }
 
-// What the search box shows as the user types (see searchLocations in the API).
+// What the area search shows as the user types.
 export interface LocationSuggestion {
-  id: string;
-  label: string; // "Columbus, OH, USA"
-  lat: number;
-  lon: number;
+  id: string; // location_id
+  label: string;
+  customersServedBand: string;
+  hasStormHistory: boolean;
 }
 
 // ---- Home ------------------------------------------------------------------
