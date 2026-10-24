@@ -26,6 +26,23 @@ Print the data schema report:
 python -m app.data
 ```
 
+### Frontend (React + Vite)
+
+The web app lives at the repo root (`src/`, `index.html`). It needs Node.js 18+.
+
+```bash
+npm install
+npm run dev        # http://localhost:5173, proxies /api/* to the backend on :8000
+```
+
+Start the backend first (`uvicorn app.main:app --port 8000`). For a deployed build, point the app at the API:
+
+```bash
+VITE_API_URL=https://your-api.example.com npm run build
+```
+
+Note: the committed `node_modules/` was built on macOS. On Windows or Linux run `npm install` (or `npm ci`) before `npm run dev`, or Vite won't start.
+
 Docker:
 ```bash
 docker build -t outage-concierge . && docker run -p 8000:8000 outage-concierge
@@ -70,6 +87,7 @@ Errors: unknown `location_id` → `404`. Invalid input (for example `storm_sever
 | `crews` | int | 1–50 | 2 | Crews assigned |
 | `access_ok` | bool | | true | false = roads blocked |
 | `declared_needs` | string[] | | [] | `medical_equipment`, `accessibility`, `critical_facility`. Opt-in only, never inferred |
+| `backup_hours` | float \| null | 0–168 | null | *(optional, new)* How long the customer's backup power lasts. Used with `medical_equipment` for the alert rule and escalation |
 
 ## POST /assess
 
@@ -173,7 +191,13 @@ Response (real output, `factor_deltas` and `assumptions` trimmed):
   - `alert_eligible` + `alert_rule`: the rule that decided it (R0–R3)
 - **`customer_actions`** — `actions`, `safety_messages`, `channel` (`sms` | `push` | `email` | `phone_call`), `send_timing`, `escalation`
 - **`meta`** — `fallback` (true = show a "we can't predict this reliably" state), `fallback_reason`, `assumptions`, `limits`, `data_mode`, `request_id`
-- **`area`** *(optional, new)* — coarse context: area label, customer-count bands, upstream protective device type, and `critical_facility_nearby` (yes/no only, never which facility or where)
+- **`area`** *(optional)* — coarse context: area label, customer-count bands, upstream protective device type, `critical_facility_nearby` (yes/no only, never which facility or where), and `upstream_chain`: the typical device chain from the substation breaker down to this area, each step with `device_type` and an approximate `customers_approx` (rounded; no device IDs)
+
+**Optional fields added later** (safe to ignore):
+- `model_estimate.restoration_histogram`: list of `{low_hours, high_hours, share}` buckets of the simulated outcomes, plus `model_estimate.simulations` (count)
+- `factor_deltas[].scenario_patch`: scenario fields that reproduce that what-if, e.g. `{"crews": 4}`. Apply it to the sliders to "try" the change
+- `meta.backtest`: `{event_label, areas, auc, high_band_hit_rate, low_band_hit_rate, high_band_areas, low_band_areas}`. Held-out check on the Feb 2025 storm: of 52 areas rated high, 81% had damage; of 21 rated low, 19% did
+- Medical-equipment customers get alerts 48 hours ahead (24 hours earlier than the standard high-risk alert), by phone
 
 ## POST /message
 
@@ -225,11 +249,19 @@ Ranges over 48 hours are written in days ("about 4 to 17 days"). When `meta.fall
 
 ## Frontend notes
 
-- Call `GET /locations` on launch to fill the location picker. The list is under the `locations` key.
-- Re-call `POST /assess` whenever a slider or toggle changes. Responses take ~10–60 ms.
-- If `meta.fallback` is true, show the fallback state and `meta.fallback_reason` instead of the risk card.
-- Show `meta.assumptions` and `meta.limits` behind an "About this estimate" button.
-- `area` is optional; safe to ignore.
+The React app in `src/` is wired to this API:
+
+| Screen | Backend data |
+|---|---|
+| Area picker | `GET /locations` (search by label; no map, because hard rule 5 forbids returning coordinates) |
+| Home | Scenario sliders → `POST /assess` (300 ms debounce): risk band + confidence + reasons, range bar + histogram, tappable what-if chips (apply `scenario_patch`), upstream chain, utility records, gray fallback card, "About this estimate" with backtest and responsible-AI checklist |
+| Alerts | Alert rule + escalation, and a 4-stage storm timeline from `POST /message` with a "Verified numbers" check |
+| Prepare | `customer_actions.actions` checklist, safety messages, "Report a downed line" (safety text only, demo) |
+| Radar, Chat | Design sample data, labeled "Sample data". Not connected |
+
+- The API layer is `src/api/backend.ts` (calls), `src/api/contract.ts` (types mirroring `app/models.py`), and `src/api/samples.ts` (sample-only screens).
+- The last good estimate is saved on the device and shown with an "offline" note if the backend can't be reached.
+- If `meta.fallback` is true, the app shows the gray fallback card and mutes the estimate cards.
 
 ## Project layout
 
@@ -247,17 +279,23 @@ app/
   safety.py       response scrubbing, audit log
   engine.py       request orchestration
 tests/
-  smoke_test.py   mild vs severe on every endpoint
+  smoke_test.py   mild vs severe on every endpoint, plus the newer optional fields
+src/              React + Vite frontend
+  api/            backend client, contract types, sample data
+  assessment.tsx  shared scenario + /assess state (with offline copy)
+  location.tsx    chosen area
+  screens/        Home, Alerts (timeline), Storm (Prepare), Radar, Chat
 ```
 
 ## Roadmap
 
-Done: data loader, resolver, risk engine with backtested confidence, Monte Carlo restoration with counterfactuals, rules engine, message generator with number validator, safety layer, critical-facility-nearby flag.
+Done: data loader, resolver, risk engine with held-out backtest, Monte Carlo restoration with histogram and what-ifs, upstream chain, rules engine with opt-in needs and backup hours, message generator with number validator, safety layer, critical-facility flag, connected frontend.
 
-Next, if time allows:
+Not done:
 1. Load the STORMS and indirect-labor files when available (replace placeholders in `config.py`)
-2. Step restoration / blast radius using the topology graph
-3. Storm replay mode for the Feb 2025 event
+2. Map with area pins: needs coordinates, which hard rule 5 forbids. The picker uses a searchable list instead
+3. Backtest of the restoration *range* against actual repair times (ARCOS dates are day-level and crew counts aren't recorded)
+4. Storm replay mode, Spanish toggle, large-text mode, chat
 
 ## Built during HackOHI/O 2026
 

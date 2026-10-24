@@ -21,6 +21,7 @@ export default function Storm() {
   const { location } = useLocation();
   const { data, error } = useAssessment();
   const [done, setDone] = useState<string[]>(loadDone);
+  const [reporting, setReporting] = useState(false);
 
   useEffect(() => {
     try {
@@ -100,6 +101,29 @@ export default function Storm() {
               );
             })}
           </ul>
+        </section>
+
+        {/* Downed line: safety guidance only. There is no reporting backend (demo). */}
+        <section className="card downed">
+          <button
+            type="button"
+            className="downed__button"
+            aria-expanded={reporting}
+            onClick={() => setReporting((v) => !v)}
+          >
+            <span aria-hidden>⚠</span> Report a downed line
+          </button>
+          {reporting && (
+            <div className="downed__body" role="alert">
+              <p>
+                <strong>Stay at least 30 feet away.</strong> Assume every downed line is live, even if
+                it isn't sparking. Keep kids and pets away.
+              </p>
+              <p>If anyone is hurt or there is a fire, call 911.</p>
+              <p>Otherwise, call your utility's outage line to report where the line is.</p>
+              <p className="faint">Demo only: this button doesn't send a report.</p>
+            </div>
+          )}
         </section>
 
         <section className="card">

@@ -17,6 +17,7 @@ export interface Scenario {
   crews: number; // 1–50
   access_ok: boolean;
   declared_needs: DeclaredNeed[]; // opt-in only
+  backup_hours?: number | null; // opt-in, used with medical_equipment
 }
 
 export interface Area {
@@ -55,6 +56,13 @@ export interface FactorDelta {
   change: string;
   new_range: RestorationRange;
   delta_text: string;
+  scenario_patch?: Partial<Scenario> | null; // apply to the sliders to try this change
+}
+
+export interface HistogramBin {
+  low_hours: number;
+  high_hours: number;
+  share: number; // 0–1
 }
 
 export interface ModelEstimate {
@@ -67,6 +75,8 @@ export interface ModelEstimate {
   factor_deltas: FactorDelta[];
   alert_eligible: boolean;
   alert_rule: string;
+  restoration_histogram?: HistogramBin[] | null;
+  simulations?: number | null;
 }
 
 export interface CustomerActions {
@@ -84,6 +94,22 @@ export interface Meta {
   limits: string[];
   data_mode: "mock" | "live";
   request_id: string;
+  backtest?: Backtest | null;
+}
+
+export interface Backtest {
+  event_label: string;
+  areas: number;
+  auc: number;
+  high_band_hit_rate: number | null;
+  low_band_hit_rate: number | null;
+  high_band_areas: number;
+  low_band_areas: number;
+}
+
+export interface ChainStep {
+  device_type: string;
+  customers_approx: number | null;
 }
 
 export interface AreaContext {
@@ -92,6 +118,7 @@ export interface AreaContext {
   upstream_device_type: string | null;
   customers_on_upstream_device_band: string | null;
   critical_facility_nearby: boolean | null;
+  upstream_chain?: ChainStep[] | null; // substation down to this area
 }
 
 export interface AssessResponse {

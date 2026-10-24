@@ -21,7 +21,8 @@ import { useLocation } from "./location";
 // ============================================================================
 
 const STORAGE_KEY = "storm-watch:scenario";
-const DEBOUNCE_MS = 180;
+const DEBOUNCE_MS = 300;
+const LAST_KEY = "storm-watch:last-estimate";
 
 export const DEFAULT_SCENARIO: Scenario = {
   storm_severity: 3,
@@ -29,13 +30,42 @@ export const DEFAULT_SCENARIO: Scenario = {
   crews: 2,
   access_ok: true,
   declared_needs: [], // opt-in only, never inferred
+  backup_hours: null,
 };
+
+// Last good estimate, kept on the device so it still shows if cell service drops.
+interface SavedEstimate {
+  locationId: string;
+  savedAt: string;
+  data: AssessResponse;
+}
+
+function loadSavedEstimate(locationId: string): SavedEstimate | null {
+  try {
+    const raw = localStorage.getItem(LAST_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as SavedEstimate;
+    return v && v.locationId === locationId && v.data ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveEstimate(locationId: string, data: AssessResponse) {
+  try {
+    const savedAt = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    localStorage.setItem(LAST_KEY, JSON.stringify({ locationId, savedAt, data }));
+  } catch {
+    /* storage full or blocked: not critical */
+  }
+}
 
 interface AssessmentContextValue {
   scenario: Scenario;
   updateScenario: (patch: Partial<Scenario>) => void;
   resetScenario: () => void;
   data: AssessResponse | null; // last good result (kept while a new one loads)
+  savedAt: string | null; // set when showing a saved copy because the backend is unreachable
   loading: boolean;
   error: string | null;
   retry: () => void;
@@ -58,6 +88,8 @@ function loadScenario(): Scenario {
             ["medical_equipment", "accessibility", "critical_facility"].includes(n),
           )
         : [],
+      backup_hours:
+        typeof s.backup_hours === "number" ? clamp(s.backup_hours, 0, 168, 8) : null,
     };
   } catch {
     return DEFAULT_SCENARIO;
@@ -74,6 +106,7 @@ export function AssessmentProvider({ children }: { children: ReactNode }) {
 
   const [scenario, setScenario] = useState<Scenario>(loadScenario);
   const [data, setData] = useState<AssessResponse | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -89,6 +122,7 @@ export function AssessmentProvider({ children }: { children: ReactNode }) {
   // Drop the old area's result when the area changes.
   useEffect(() => {
     setData(null);
+    setSavedAt(null);
     setError(null);
   }, [locationId]);
 
@@ -100,7 +134,9 @@ export function AssessmentProvider({ children }: { children: ReactNode }) {
       assess(locationId, scenario, ctrl.signal)
         .then((d) => {
           setData(d);
+          setSavedAt(null);
           setError(null);
+          saveEstimate(locationId, d);
         })
         .catch((e: unknown) => {
           if (ctrl.signal.aborted) return;
@@ -108,7 +144,13 @@ export function AssessmentProvider({ children }: { children: ReactNode }) {
             clearLocation(); // saved area no longer exists on the server
             return;
           }
-          setError("Couldn't reach the outage service. Check that the backend is running.");
+          setError("Couldn't reach the outage service. Check your connection.");
+          // Offline: fall back to the last estimate saved on this device.
+          const saved = loadSavedEstimate(locationId);
+          if (saved) {
+            setData((cur) => cur ?? saved.data);
+            setSavedAt(saved.savedAt);
+          }
         })
         .finally(() => {
           if (!ctrl.signal.aborted) setLoading(false);
@@ -128,8 +170,8 @@ export function AssessmentProvider({ children }: { children: ReactNode }) {
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   const value = useMemo<AssessmentContextValue>(
-    () => ({ scenario, updateScenario, resetScenario, data, loading, error, retry }),
-    [scenario, updateScenario, resetScenario, data, loading, error, retry],
+    () => ({ scenario, updateScenario, resetScenario, data, savedAt, loading, error, retry }),
+    [scenario, updateScenario, resetScenario, data, savedAt, loading, error, retry],
   );
 
   return <AssessmentContext.Provider value={value}>{children}</AssessmentContext.Provider>;
@@ -159,6 +201,11 @@ export function formatHours(h: number): string {
 
 function fmt(x: number): string {
   return x >= 10 ? String(Math.round(x)) : String(Math.round(x * 10) / 10);
+}
+
+// "R2: declared medical equipment ..." -> "declared medical equipment ..."
+export function plainRule(rule: string): string {
+  return rule.replace(/^R\d+:\s*/, "");
 }
 
 export const CHANNEL_LABEL: Record<string, string> = {

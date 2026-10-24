@@ -11,6 +11,7 @@ This is a 22-hour hackathon project. A focused, explainable prototype beats broa
 - `app/engine.py` orchestrates resolver → risk → restoration → rules → messages.
 - Missing from the data package: STORMS labor-hour and indirect-labor Excel files. Restoration uses labeled placeholders in `app/config.py` until they arrive.
 - Smoke test: `python -m tests.smoke_test`.
+- Frontend is a React + Vite web app in `src/` (not Flutter), wired to the API through `src/api/backend.ts`. Radar and Chat screens are labeled sample data.
 
 ## Run
 

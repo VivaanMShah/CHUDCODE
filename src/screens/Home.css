@@ -536,3 +536,262 @@
   margin-top: 10px;
   font-size: 10px;
 }
+
+/* ==========================================================================
+   Roadmap features
+   ========================================================================== */
+
+/* ---- Offline notice ---- */
+.offline {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12.5px;
+  border-color: var(--border-strong);
+}
+
+/* ---- Fallback: distinct gray card ---- */
+.fallback {
+  background: rgba(150, 160, 175, 0.12);
+  border-color: rgba(170, 182, 200, 0.35);
+}
+.fallback__title {
+  margin-top: 6px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.fallback__reason {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+.fallback__label {
+  display: block;
+  margin-top: 10px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.fallback__list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* ---- Alert qualification badge ---- */
+.qualify {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+.qualify.is-on {
+  border-color: rgba(60, 207, 145, 0.45);
+  background: rgba(60, 207, 145, 0.08);
+}
+.qualify__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  font-weight: 700;
+}
+.qualify.is-on .qualify__icon {
+  background: var(--green);
+  color: #062016;
+}
+.qualify__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.qualify__text strong {
+  font-size: 13px;
+}
+.qualify__text span {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ---- Confidence pill ---- */
+.pill {
+  display: inline-flex;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid currentColor;
+}
+.pill--high {
+  color: var(--green);
+}
+.pill--medium {
+  color: var(--yellow);
+}
+.pill--low {
+  color: #c3ccd9;
+}
+
+/* ---- Range bar + histogram ---- */
+.rangebar {
+  margin: 4px 0 10px;
+}
+.rangebar__hist {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 40px;
+}
+.rangebar__col {
+  flex: 1;
+  border-radius: 2px 2px 0 0;
+  background: rgba(255, 255, 255, 0.14);
+}
+.rangebar__col.is-inside {
+  background: var(--blue);
+}
+.rangebar__track {
+  position: relative;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.rangebar__fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--blue), #7fb0ff);
+}
+.rangebar__median {
+  position: absolute;
+  top: -3px;
+  width: 3px;
+  height: 14px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: #fff;
+}
+.rangebar__scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* ---- What-if chips ---- */
+.deltas__title {
+  display: block;
+  margin-top: 14px;
+}
+.delta-chips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+.delta-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  text-align: left;
+  font-size: 12px;
+  transition: background 0.15s ease;
+}
+.delta-chip:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.delta-chip .mono {
+  font-size: 11px;
+}
+.delta-chip small {
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+.delta-chip.is-faster small {
+  color: var(--green);
+}
+.delta-chip.is-slower small {
+  color: var(--orange);
+}
+
+/* ---- Upstream chain ---- */
+.chain__intro {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+.chain {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+.chain__step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  font-size: 12.5px;
+}
+.chain__step + .chain__step::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: -8px;
+  height: 16px;
+  width: 2px;
+  background: var(--border-strong);
+}
+.chain__node {
+  width: 12px;
+  height: 12px;
+  margin-left: 3px;
+  border-radius: 50%;
+  border: 2px solid var(--blue);
+  background: var(--bg-1);
+}
+.chain__step--you .chain__node {
+  background: var(--blue);
+}
+.chain__step--you .chain__name {
+  font-weight: 700;
+}
+.chain__count {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ---- About ---- */
+.about__label {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--yellow);
+}
+.checklist {
+  list-style: none;
+  padding-left: 0 !important;
+}
+.checklist li::before {
+  content: "✓ ";
+  color: var(--green);
+}

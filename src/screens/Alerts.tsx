@@ -71,11 +71,11 @@ const SEVERITY: Record<Band, AlertSeverity> = {
   low: "advisory",
 };
 
-const MESSAGE_TABS: { id: MessageType; label: string }[] = [
-  { id: "pre_storm", label: "Before" },
-  { id: "outage_confirmed", label: "Outage" },
-  { id: "estimate_updated", label: "Update" },
-  { id: "restoration_complete", label: "Restored" },
+const STAGES: { id: MessageType; label: string; hint: string }[] = [
+  { id: "pre_storm", label: "Before the storm", hint: "Get ready" },
+  { id: "outage_confirmed", label: "Outage confirmed", hint: "Power is out" },
+  { id: "estimate_updated", label: "Estimate updated", hint: "Repairs underway" },
+  { id: "restoration_complete", label: "Power restored", hint: "All clear" },
 ];
 
 const PUSH_KEY = "storm-watch:push";
@@ -204,40 +204,55 @@ export default function Alerts() {
           </ul>
         </section>
 
-        {/* Customer message preview */}
+        {/* Storm timeline: the whole customer journey, one stage at a time */}
         <section className="card">
-          <span className="eyebrow">Messages we'd send</span>
-          <div className="msg-tabs" role="tablist" aria-label="Message stage">
-            {MESSAGE_TABS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                role="tab"
-                aria-selected={msgType === t.id}
-                className={`msg-tabs__item${msgType === t.id ? " is-on" : ""}`}
-                onClick={() => setMsgType(t.id)}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-          {msgError ? (
-            <p className="dim msg__text">Couldn't load this message.</p>
-          ) : msg && msg.message_type === msgType ? (
-            <>
-              <p className="msg__text">{msg.text}</p>
-              <p className="msg__meta">
-                <span>{CHANNEL_LABEL[msg.channel] ?? msg.channel}</span>
-                <span>·</span>
-                <span>{msg.send_timing}</span>
-              </p>
-              <span className={`badge ${msg.validated ? "badge--advisory" : "badge--warning"}`}>
-                {msg.validated ? "Numbers checked against data" : "Numbers not verified"}
-              </span>
-            </>
-          ) : (
-            <p className="dim msg__text">Loading…</p>
-          )}
+          <span className="eyebrow">Storm timeline · tap a stage</span>
+          <ol className="timeline">
+            {STAGES.map((st, i) => {
+              const on = msgType === st.id;
+              return (
+                <li key={st.id} className={`timeline__stage${on ? " is-on" : ""}`}>
+                  <button
+                    type="button"
+                    className="timeline__head"
+                    aria-expanded={on}
+                    onClick={() => setMsgType(st.id)}
+                  >
+                    <span className="timeline__dot" aria-hidden>{i + 1}</span>
+                    <span className="timeline__label">
+                      <strong>{st.label}</strong>
+                      <small>{st.hint}</small>
+                    </span>
+                  </button>
+                  {on && (
+                    <div className="timeline__body">
+                      {msgError ? (
+                        <p className="dim">Couldn't load this message.</p>
+                      ) : msg && msg.message_type === st.id ? (
+                        <div className="notif" aria-label="Message preview">
+                          <div className="notif__top">
+                            <span className="notif__app">Outage Concierge</span>
+                            <span className="notif__channel">
+                              {CHANNEL_LABEL[msg.channel] ?? msg.channel}
+                            </span>
+                          </div>
+                          <p className="notif__text">{msg.text}</p>
+                          <div className="notif__foot">
+                            <span>{msg.send_timing}</span>
+                            <span className={`notif__check${msg.validated ? " is-ok" : ""}`}>
+                              {msg.validated ? "✓ Verified numbers" : "Numbers not verified"}
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="dim">Loading…</p>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
         </section>
 
         {/* Push notifications (saved on this device only) */}
