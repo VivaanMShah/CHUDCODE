@@ -349,8 +349,7 @@ new one fails its health check) -> prints the link. Takes about 5 to 8 minutes.
   for build sources, 2 log groups, 3 IAM roles, a CodeBuild project, a load balancer, an ECS cluster and service.
   Cost is roughly $2 a day while running (Fargate 1 vCPU and 2 GB, plus the load balancer). To stop paying, set the
   service's desired count to 0 or delete the resources.
-- **HTTP only.** The default load balancer address is plain `http://`. HTTPS needs a domain name and certificate, or a
-  CloudFront distribution in front.
+- **Links.** The site is served over HTTPS through a free CloudFront address (`https://d2tlt5u3knv52w.cloudfront.net`), which forwards to the load balancer (`http://outage-concierge-alb-233066956.us-east-1.elb.amazonaws.com`). A load balancer can't offer HTTPS on its default AWS address, so use the CloudFront link, especially on phones. A custom domain would need a certificate.
 - **Logs:** CloudWatch group `/ecs/outage-concierge` (includes the audit log). Build logs: `/codebuild/outage-concierge`.
 - **Limits to know:** one task runs (no auto-scaling), and uvicorn's access log is off so ZIPs in URLs aren't logged.
 

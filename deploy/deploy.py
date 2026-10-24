@@ -166,4 +166,5 @@ if __name__ == "__main__":
     url = f"http://{res['alb_dns']}"
     say("Checking the live site")
     ok = wait_healthy(url)
-    say(f"\n{'Live' if ok else 'Deployed, but /health is not answering yet'}: {url}   ({(time.time() - t0) / 60:.1f} min)")
+    say(f"\n{'Live' if ok else 'Deployed, but /health is not answering yet'}: {res['https_url']}   ({(time.time() - t0) / 60:.1f} min)")
+    say(f"Plain http link: {url}")

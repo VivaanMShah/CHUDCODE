@@ -76,6 +76,40 @@ def ensure_role(name: str, service: str, managed: list[str], inline: dict | None
     return arn
 
 
+# ---------------------------------------------------------------- HTTPS
+
+def ensure_https(alb_dns: str) -> dict:
+    """CloudFront in front of the load balancer gives a free https:// address (the ALB itself can't, without a domain)."""
+    cf = client("cloudfront")
+    for page in cf.get_paginator("list_distributions").paginate():
+        for d in (page.get("DistributionList") or {}).get("Items") or []:
+            if d["Comment"] == NAME:
+                return {"cf_id": d["Id"], "https_url": f"https://{d['DomainName']}"}
+    cfg = {
+        "CallerReference": f"{NAME}-{int(time.time())}", "Comment": NAME, "Enabled": True, "PriceClass": "PriceClass_100",
+        "Origins": {"Quantity": 1, "Items": [{"Id": "alb", "DomainName": alb_dns, "CustomOriginConfig": {
+            "HTTPPort": 80, "HTTPSPort": 443, "OriginProtocolPolicy": "http-only", "OriginReadTimeout": 30}}]},
+        "DefaultCacheBehavior": {
+            "TargetOriginId": "alb", "ViewerProtocolPolicy": "redirect-to-https", "Compress": True,
+            "AllowedMethods": {"Quantity": 7, "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
+                               "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]}},
+            "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",          # managed: CachingDisabled
+            "OriginRequestPolicyId": "b689b0a8-53d0-40ab-baf2-68738e2966ac"},  # managed: AllViewerExceptHostHeader
+        "ViewerCertificate": {"CloudFrontDefaultCertificate": True},
+    }
+    d = cf.create_distribution(DistributionConfig=cfg)["Distribution"]
+    say("  created CloudFront distribution")
+    return {"cf_id": d["Id"], "https_url": f"https://{d['DomainName']}"}
+
+
+def wait_deployed(cf_id: str) -> None:
+    cf = client("cloudfront")
+    for _ in range(60):
+        if cf.get_distribution(Id=cf_id)["Distribution"]["Status"] == "Deployed":
+            return
+        time.sleep(15)
+
+
 # ---------------------------------------------------------------- main
 
 def ensure_all() -> dict:
@@ -172,10 +206,16 @@ def ensure_all() -> dict:
 
     say("ECS cluster")
     client("ecs").create_cluster(clusterName=NAME)  # idempotent
+
+    say("HTTPS address")
+    res.update(ensure_https(res["alb_dns"]))
     say("Ready.")
     return res
 
 
 if __name__ == "__main__":
     out = ensure_all()
-    say(f"Link (after the first deploy): http://{out['alb_dns']}")
+    say("Waiting for CloudFront to finish (a few minutes the first time)")
+    wait_deployed(out["cf_id"])
+    say(f"HTTPS link: {out['https_url']}")
+    say(f"Plain link: http://{out['alb_dns']}")
