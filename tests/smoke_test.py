@@ -92,6 +92,27 @@ def test_all():
         assert "2 hours" in b3["customer_actions"]["escalation"]["trigger"]
         print("new features ok: histogram, patches, chain, backtest, backup hours")
 
+        # ZIP search + live weather
+        z = c.get("/zip/24014")
+        if h["data_mode"] == "live":
+            assert z.status_code == 200, z.text
+            zb = z.json()
+            check_privacy(zb)
+            assert zb["location_id"] == "ZIP-24014"
+            w = c.get("/weather/24014").json()
+            check_privacy(w)
+            assert w["fallback"] or 1 <= w["severity"] <= 5
+            assert "lat" not in json.dumps(w).lower() or '"lat"' not in json.dumps(w)
+            za = [c.post("/assess", json={"location_id": "ZIP-24014", "scenario": sc}).json()
+                  for sc in (MILD, SEVERE)]
+            assert za[0]["model_estimate"] != za[1]["model_estimate"], "ZIP outputs did not change"
+            check_privacy(za[1])
+            print(f"zip ok: {zb['label']} | weather: severity={w['severity']} chance={w['chance_pct']}% "
+                  f"alerts={None if w['alerts'] is None else len(w['alerts'])}")
+        assert c.get("/zip/99999").status_code == 404
+        assert c.get("/zip/12ab5").status_code == 422
+        assert c.post("/assess", json={"location_id": "ZIP-99999"}).status_code == 404
+
         assert c.post("/assess", json={"location_id": "LOC-999"}).status_code == 404
         assert c.post("/assess", json={"location_id": with_hist, "scenario": {"storm_severity": 9}}).status_code == 422
         assert c.post("/assess", json={"location_id": with_hist,

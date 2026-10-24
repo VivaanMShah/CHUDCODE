@@ -5,12 +5,13 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Path
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import engine, safety
+from . import engine, safety, weather
 from .models import (AssessRequest, AssessResponse, HealthResponse, LocationsResponse,
-                     MessageRequest, MessageResponse)
+                     MessageRequest, MessageResponse, WeatherResponse, ZipResponse)
+from .resolver import resolve
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("main")
@@ -46,6 +47,7 @@ def health():
         "files_loaded": sum(1 for r in rep.values() if r["status"] == "ok"),
         "files_missing": missing,
         "backtest_auc": round(s.model.auc, 3) if s.model.auc is not None else None,
+        "weather_model_auc": s.weather_model["metrics"]["auc"] if s.weather_model else None,
     }
 
 
@@ -84,3 +86,28 @@ def message(req: MessageRequest):
     safety.audit("/message", rid, req.location_id, req.scenario,
                  {"risk_band": band, "fallback": out["meta"]["fallback"], "validated": out["validated"]}, t0)
     return out
+
+
+ZIP_PATH = Path(..., pattern=r"^\d{5}$", description="5-digit ZIP code")
+
+
+@app.get("/zip/{zip_code}", response_model=ZipResponse)
+def zip_lookup(zip_code: str = ZIP_PATH):
+    """Turn a ZIP into an area id. Returns no coordinates and nothing about people."""
+    loc = resolve(_state().store, f"ZIP-{zip_code}")
+    if loc is None:
+        raise HTTPException(404, "We don't have outage data for that ZIP code yet.")
+    city = loc.label.split("·")[-1].strip()
+    return {"zip": zip_code, "location_id": loc.location_id, "label": loc.label, "city": city,
+            "customers_served_band": loc.customers_served_band}
+
+
+@app.get("/weather/{zip_code}", response_model=WeatherResponse)
+def live_weather(zip_code: str = ZIP_PATH):
+    """Current storm strength (1-5) from live forecasts, plus the next 12 hours and NWS alerts.
+    Only the ZIP's public center point is sent to the weather services."""
+    s = _state()
+    loc = resolve(s.store, f"ZIP-{zip_code}")
+    if loc is None:
+        raise HTTPException(404, "We don't have outage data for that ZIP code yet.")
+    return {"location_id": loc.location_id, **weather.live_weather(s.weather_model, loc.lat, loc.lon)}

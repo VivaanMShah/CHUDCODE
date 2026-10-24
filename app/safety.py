@@ -63,9 +63,17 @@ def _audit_logger():
     return _audit
 
 
+def mask_location(location_id: str | None) -> str | None:
+    """Log only the first 3 digits of a ZIP (ZIP-240xx) so the audit log can't point at a small area."""
+    if location_id and location_id.startswith("ZIP-") and len(location_id) >= 8:
+        return location_id[:7] + "xx"
+    return location_id
+
+
 def audit(endpoint: str, request_id: str, location_id: str | None, scenario, result: dict | None,
           started: float, status: int = 200) -> None:
     """One JSON line per request. No personal data: declared needs are logged as a count only."""
+    location_id = mask_location(location_id)
     entry = {
         "ts": round(time.time(), 3),
         "request_id": request_id,

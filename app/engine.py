@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 
 from . import config as C
-from . import data, messages, restoration, risk, rules
+from . import data, messages, restoration, risk, rules, weather
 from .resolver import resolve, upstream_band
 
 log = logging.getLogger("engine")
@@ -18,6 +18,7 @@ class State:
     store: data.Store
     model: risk.RiskModel
     data_mode: str
+    weather_model: dict | None = None
 
 
 def startup() -> State:
@@ -29,7 +30,7 @@ def startup() -> State:
         mode = "mock"
     model = risk.train(store) if mode == "live" else risk.RiskModel()
     log.info("engine: ready in %s mode\n%s", mode, data.schema_report(store))
-    return State(store, model, mode)
+    return State(store, model, mode, weather.load_model())
 
 
 def backtest(state: State) -> dict | None:
@@ -90,7 +91,7 @@ def _assumptions(state: State, scenario) -> list[str]:
     return out
 
 
-def _limits(state: State) -> list[str]:
+def _limits(state: State, is_zip: bool = False) -> list[str]:
     out = [
         "Estimates are model output, not confirmed restoration times from the utility.",
         f"The range covers the 10th to 90th percentile of {C.MC_SAMPLES} simulations; "
@@ -98,6 +99,9 @@ def _limits(state: State) -> list[str]:
         "Locations are neighborhood-level areas (one circuit), not individual homes.",
         "Damage records have day-level dates only, so past repair times are approximate.",
     ]
+    if is_zip:
+        out.append("A ZIP code is served by several circuits. The estimate is for a typical one, "
+                   "and ZIP borders are approximate.")
     if state.model.ok:
         out.append(f"The risk model learned from {state.model.n_train} areas and one major storm; "
                    "other storm types may behave differently.")
@@ -106,7 +110,7 @@ def _limits(state: State) -> list[str]:
     return out
 
 
-def _confirmed(state: State, feats: dict) -> list[dict]:
+def _confirmed(state: State, feats: dict, is_zip: bool = False) -> list[dict]:
     """Only real utility records. Nothing predicted goes here."""
     if state.data_mode != "live":
         return []
@@ -115,7 +119,7 @@ def _confirmed(state: State, feats: dict) -> list[dict]:
     ev = int(feats.get("hist_events") or 0)
     if n:
         out.append({"fact": "past_damage_reports", "value": n, "source": "ARCOS damage assessment records",
-                    "text": f"Utility records show {n} storm damage reports in this area across {ev} past "
+                    "text": f"Utility records show {n} storm damage reports on a {'typical circuit serving this ZIP' if is_zip else 'circuit here'} across {ev} past "
                             f"storm{'s' if ev != 1 else ''}."})
     ref = state.store.reference_event
     r = int(feats.get("ref_records") or 0)
@@ -182,7 +186,7 @@ def assess(state: State, location_id: str, scenario, request_id: str) -> dict | 
     }
     return {
         "location_id": location_id,
-        "confirmed": _confirmed(state, f),
+        "confirmed": _confirmed(state, f, loc.is_zip),
         "model_estimate": {
             "risk_band": rk["risk_band"],
             "risk_score": rk["risk_score"],
@@ -201,7 +205,7 @@ def assess(state: State, location_id: str, scenario, request_id: str) -> dict | 
             "fallback": fallback,
             "fallback_reason": fallback_reason,
             "assumptions": _assumptions(state, scenario),
-            "limits": _limits(state),
+            "limits": _limits(state, loc.is_zip),
             "data_mode": state.data_mode,
             "request_id": request_id,
             "backtest": backtest(state),

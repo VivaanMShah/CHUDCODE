@@ -185,12 +185,59 @@ class LocationsResponse(BaseModel):
     data_mode: Literal["mock", "live"]
 
 
+class ZipResponse(BaseModel):
+    zip: str
+    location_id: str  # use this with /assess, /message, /weather
+    label: str
+    city: str
+    customers_served_band: str
+
+
+class WeatherHour(BaseModel):
+    hours_ahead: int
+    label: str
+    precip_in: float
+    gust_mph: int
+    wind_from_deg: int
+    temp_f: int
+
+
+class WeatherAlert(BaseModel):
+    event: str
+    severity: str
+    headline: str
+    ends: Optional[str] = None
+    instruction: Optional[str] = None
+
+
+class WeatherModelInfo(BaseModel):
+    auc_out_of_time: float
+    damage_days: int
+    days: int
+
+
+class WeatherResponse(BaseModel):
+    location_id: str
+    updated_at: str
+    severity: Optional[int] = Field(None, ge=1, le=5)  # null when live weather is unavailable
+    severity_label: Optional[str] = None
+    chance_pct: Optional[int] = None
+    peak_day: Optional[Literal["today", "tomorrow"]] = None
+    reasons: List[Reason] = []
+    hourly: List[WeatherHour] = []
+    alerts: Optional[List[WeatherAlert]] = None  # null = could not check
+    fallback: bool
+    fallback_reason: Optional[str] = None
+    model: Optional[WeatherModelInfo] = None
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     data_mode: Literal["mock", "live"]
     files_loaded: int
     files_missing: List[str]
     backtest_auc: Optional[float] = None
+    weather_model_auc: Optional[float] = None
 
 
 Meta.model_rebuild()

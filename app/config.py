@@ -5,6 +5,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 CACHE_DIR = DATA_DIR / "_cache"
 LOG_DIR = ROOT / "logs"
+ZIP_TABLE = ROOT / "app" / "zip_centers.csv"   # public ZIP -> city + center point
+WEATHER_MODEL = ROOT / "app" / "weather_model.json"  # trained by python -m app.train_weather
 
 FILES = {
     "arcos": DATA_DIR / "Data1" / "arcos_prod_damage_09_28_Clip.shp",
@@ -32,6 +34,9 @@ MIN_CUSTOMERS_PER_LOCATION = 50
 
 # Critical facility "nearby" = within this distance of the circuit's primary lines.
 CRITICAL_FACILITY_RADIUS_M = 800
+
+# A ZIP counts as served when at least this many customers sit closest to its center.
+MIN_CUSTOMERS_PER_ZIP = 100
 
 # Monte Carlo (fixed so the demo is repeatable)
 MC_SAMPLES = 2000

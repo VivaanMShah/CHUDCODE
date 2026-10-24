@@ -23,7 +23,7 @@ from . import config as C
 
 log = logging.getLogger("data")
 
-CACHE_VERSION = 4
+CACHE_VERSION = 6
 
 # ARCOS asset type -> damage class used by the restoration engine.
 ARCOS_CLASS = {
@@ -41,7 +41,7 @@ NON_WOOD = {"fiberglass", "steel", "concrete", "aluminum", "composite", "unknown
 
 REQUIRED_COLUMNS = {
     "arcos": ["Substation", "Circuit", "Report_Tim", "Repaired", "Repaired_D", "Asset_Type", "Inform_Wor", "Access_Iss"],
-    "customers": ["aep_xfmr_l", "circuit_id", "kind_of_se", "city", "premise_nu"],
+    "customers": ["aep_xfmr_l", "circuit_id", "kind_of_se", "city", "premise_nu", "service_po", "service__1"],
     "transformers": ["location_n", "aep_statio", "aep_circui", "circuit_id"],
     "primary": ["aep_statio", "aep_circui", "usage", "report_len"],
     "poles": ["date_insta", "material", "owner_type"],
@@ -59,6 +59,8 @@ class Store:
     report: dict = field(default_factory=dict)       # file key -> {"status", "rows", "detail"}
     circuits: pd.DataFrame | None = None             # index = circuit key "STATION|CIR"
     locations: pd.DataFrame | None = None            # location_id, key, label, band, has_history
+    zip_index: pd.DataFrame | None = None            # zip, city, lat, lon, customers (server-side only)
+    zip_weights: pd.DataFrame | None = None          # zip, key, w: circuits serving the ZIP, weights sum to 1
     arcos: pd.DataFrame | None = None                # damage records, no coordinates
     reference_event: dict | None = None              # largest storm in history
     events: list = field(default_factory=list)
@@ -162,7 +164,9 @@ def _build(store: Store) -> None:
         circuit_id_to_key = d.groupby("circuit_id")["key"].agg(lambda s: s.value_counts().index[0]).to_dict()
 
     # --- customers: aggregate only. No coordinates, addresses or life-support flag loaded. ---
-    cust = _read(store, "customers", columns=["aep_xfmr_l", "circuit_id", "kind_of_se", "city", "premise_nu"])
+    cust = _read(store, "customers", columns=["aep_xfmr_l", "circuit_id", "kind_of_se", "city", "premise_nu",
+                                              "service_po", "service__1"])
+    zip_by_key = None
     premise_to_key = {}
     feats = pd.DataFrame()
     if cust is not None:
@@ -171,6 +175,7 @@ def _build(store: Store) -> None:
         cust["key"] = k
         cust = cust.dropna(subset=["key"])
         premise_to_key = dict(zip(cust.premise_nu, cust.key))
+        zip_by_key = _zip_counts(store, cust)  # uses customer points once, then they are dropped
         g = cust.groupby("key")
         feats = pd.DataFrame({
             "n_customers": g.size(),
@@ -338,6 +343,59 @@ def _build(store: Store) -> None:
         loc["customers_served_band"] = loc.n_customers.map(_customers_band)
         loc["has_storm_history"] = loc.get("hist_records", pd.Series(0, index=loc.index)) > 0
         store.locations = loc[["location_id", "key", "label", "customers_served_band", "has_storm_history"]]
+        store.zip_index, store.zip_weights = _zip_index(zip_by_key, set(loc.key))
+
+
+def _load_zip_table() -> pd.DataFrame | None:
+    if not C.ZIP_TABLE.exists():
+        return None
+    z = pd.read_csv(C.ZIP_TABLE, dtype={"zip": str})
+    return z[z.state == "VA"].reset_index(drop=True)
+
+
+def _zip_counts(store: Store, cust: pd.DataFrame) -> pd.DataFrame | None:
+    """Count customers per (ZIP center, circuit). Each customer goes to the nearest ZIP center.
+
+    ZIPs that share a center point (PO-box ZIPs) are treated as one place. Approximation:
+    real ZIP borders are not in the data, so this is nearest-center, not exact."""
+    z = _load_zip_table()
+    if z is None:
+        store.report["zip_table"] = {"status": "missing", "rows": 0, "detail": f"{C.ZIP_TABLE.name} not found"}
+        return None
+    from scipy.spatial import cKDTree
+
+    centers = z.drop_duplicates(["lat", "lon"]).reset_index(drop=True)
+    k = np.cos(np.radians(37.3))  # shrink longitude so distances are roughly equal in both directions
+    tree = cKDTree(np.c_[centers.lat, centers.lon * k])
+    dist, idx = tree.query(np.c_[cust.service__1.values, cust.service_po.values * k])
+    ok = dist < 0.25  # about 25 km; farther customers are outside our ZIP table
+    counts = (pd.DataFrame({"c": idx[ok], "key": cust.key.values[ok]}).groupby(["c", "key"]).size()
+              .rename("n").reset_index())
+    counts["lat"] = centers.lat.values[counts.c]
+    counts["lon"] = centers.lon.values[counts.c]
+    store.report["zip_table"] = {"status": "ok", "rows": len(z), "detail": f"{len(centers)} distinct centers"}
+    return counts
+
+
+def _zip_index(counts: pd.DataFrame | None, valid_keys: set):
+    """ZIP -> the (up to 5) circuits serving most of the customers near its center.
+
+    A ZIP is served by many circuits, so no single one represents it. The weights let the
+    resolver build a 'typical circuit' for the ZIP."""
+    z = _load_zip_table()
+    if counts is None or z is None:
+        return None, None
+    counts = counts[counts.key.isin(valid_keys)]
+    customers = counts.groupby("c").n.sum().rename("customers")
+    top = (counts.sort_values("n", ascending=False).groupby("c").head(5)
+           .assign(w=lambda t: t.n / t.groupby("c").n.transform("sum")))
+    centers = counts.drop_duplicates("c").set_index("c")[["lat", "lon"]].join(customers)
+    centers = centers[centers.customers >= C.MIN_CUSTOMERS_PER_ZIP].reset_index()
+    index = z.merge(centers, on=["lat", "lon"], how="inner")
+    index["lat"], index["lon"] = index.lat.round(2), index.lon.round(2)
+    weights = z.merge(top[["c", "key", "w", "lat", "lon"]], on=["lat", "lon"], how="inner")[["zip", "key", "w"]]
+    weights = weights[weights.zip.isin(index.zip)]
+    return index[["zip", "city", "lat", "lon", "customers"]].reset_index(drop=True), weights.reset_index(drop=True)
 
 
 def mock_store(report: dict | None = None) -> Store:
@@ -361,6 +419,13 @@ def mock_store(report: dict | None = None) -> Store:
         "customers_served_band": [_customers_band(n) for n in circ.n_customers],
         "has_storm_history": circ.hist_records > 0,
     })
+    s.zip_index = pd.DataFrame({
+        "zip": ["24014", "24153", "24179", "24083", "24019"],
+        "city": ["Roanoke", "Salem", "Vinton", "Daleville", "Roanoke"],
+        "lat": [37.23, 37.29, 37.28, 37.41, 37.33], "lon": [-79.95, -80.07, -79.88, -79.92, -79.96],
+        "customers": [900, 700, 500, 300, 600]})
+    s.zip_weights = pd.DataFrame({"zip": ["24014", "24153", "24179", "24083", "24019"],
+                                  "key": list(circ.index), "w": [1.0] * 5})
     s.damage_mix = {"pole": 0.22, "primary_wire": 0.49, "secondary_wire": 0.08, "transformer": 0.05,
                     "fuse_switch": 0.24, "recloser": 0.0, "other_equipment": 0.0}
     return s
