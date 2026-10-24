@@ -32,6 +32,22 @@ def startup() -> State:
     return State(store, model, mode)
 
 
+def backtest(state: State) -> dict | None:
+    m = state.model
+    if not m.ok:
+        return None
+    hi, lo = m.hit_rates.get("high", {}), m.hit_rates.get("low", {})
+    return {
+        "event_label": (state.store.reference_event or {}).get("label", "largest storm on record"),
+        "areas": m.n_train,
+        "auc": round(m.auc, 3),
+        "high_band_hit_rate": None if hi.get("rate") is None else round(hi["rate"], 2),
+        "low_band_hit_rate": None if lo.get("rate") is None else round(lo["rate"], 2),
+        "high_band_areas": hi.get("areas", 0),
+        "low_band_areas": lo.get("areas", 0),
+    }
+
+
 def _assumptions(state: State, scenario) -> list[str]:
     m, ref = state.model, state.store.reference_event or {}
     ref_label = ref.get("label", "largest storm on record")
@@ -41,6 +57,11 @@ def _assumptions(state: State, scenario) -> list[str]:
         out.append(f"Risk model: logistic regression on miles of overhead line, customers served, and past "
                    f"damage. Trained on history before the {ref_label} and backtested on it "
                    f"(AUC {m.auc:.2f} across {m.n_train} areas).")
+        hi, lo = m.hit_rates.get("high", {}), m.hit_rates.get("low", {})
+        if hi.get("rate") is not None and lo.get("rate") is not None:
+            out.append(f"Held-out check: of {hi['areas']} areas the model rated high risk for that storm, "
+                       f"{round(hi['rate'] * 100)}% had damage; of {lo['areas']} rated low, "
+                       f"{round(lo['rate'] * 100)}% did.")
     else:
         out.append("Risk model unavailable; risk uses a neutral baseline adjusted for storm severity.")
     out += [
@@ -55,6 +76,14 @@ def _assumptions(state: State, scenario) -> list[str]:
         f"Each crew is available {round(C.CREW_AVAILABILITY * 100)}% of the time and works "
         f"{restoration.WORK_HOURS_PER_DAY}-hour shifts.",
     ]
+    needs = [n.value if hasattr(n, "value") else n for n in scenario.declared_needs]
+    if "medical_equipment" in needs:
+        if scenario.backup_hours is not None:
+            out.append(f"You told us your backup power lasts {scenario.backup_hours:g} hours. "
+                       "We compare that to the high end of the range.")
+        else:
+            out.append(f"Backup power for medical equipment is assumed to last {C.MEDICAL_BACKUP_HOURS} hours "
+                       "unless you tell us otherwise.")
     if scenario.damaged_poles > 0:
         out.append("Other damage (wires, fuses, transformers) is scaled from the pole count using the "
                    f"{ref_label} damage mix.")
@@ -118,8 +147,12 @@ def assess(state: State, location_id: str, scenario, request_id: str) -> dict | 
     n = int(f.get("hist_records") or 0)
     reason_bits = []
     if state.model.ok:
-        reason_bits.append(f"model backtest AUC {state.model.auc:.2f} on the "
-                           f"{(state.store.reference_event or {}).get('label', 'largest storm')}")
+        hr = state.model.hit_rates.get("high", {}).get("rate")
+        bit = (f"model backtest AUC {state.model.auc:.2f} on the "
+               f"{(state.store.reference_event or {}).get('label', 'largest storm')}")
+        if hr is not None:
+            bit += f" ({round(hr * 100)}% of areas it rated high had damage)"
+        reason_bits.append(bit)
     reason_bits.append(f"{n} past damage report{'s' if n != 1 else ''} in this area")
     reason_bits.append(f"restoration range spread {rs['spread']:.1f} times the median")
     confidence_reason = (f"Confidence is {confidence}: " + "; ".join(reason_bits) + ".")
@@ -145,6 +178,7 @@ def assess(state: State, location_id: str, scenario, request_id: str) -> dict | 
         "upstream_device_type": f.get("upstream_device_type"),
         "customers_on_upstream_device_band": upstream_band(f.get("customers_on_upstream_device")),
         "critical_facility_nearby": bool(f.get("critical_facility_nearby")) if state.data_mode == "live" else None,
+        "upstream_chain": f.get("upstream_chain") if isinstance(f.get("upstream_chain"), list) else None,
     }
     return {
         "location_id": location_id,
@@ -159,6 +193,8 @@ def assess(state: State, location_id: str, scenario, request_id: str) -> dict | 
             "factor_deltas": rs["deltas"],
             "alert_eligible": rl["alert_eligible"],
             "alert_rule": rl["alert_rule"],
+            "restoration_histogram": rs["histogram"],
+            "simulations": rs["simulations"],
         },
         "customer_actions": rl["customer_actions"],
         "meta": {
@@ -168,6 +204,7 @@ def assess(state: State, location_id: str, scenario, request_id: str) -> dict | 
             "limits": _limits(state),
             "data_mode": state.data_mode,
             "request_id": request_id,
+            "backtest": backtest(state),
         },
         "area": area,
     }
@@ -201,6 +238,10 @@ def message(state: State, location_id: str, message_type: str, scenario, request
         "risk_band": est["risk_band"],
         "top_action": acts["actions"][0] if acts["actions"] else "",
     }
+    chain = (a.get("area") or {}).get("upstream_chain") or []
+    line = next((c for c in chain if c["device_type"] == "recloser"), chain[0] if chain else None)
+    if line and line.get("customers_approx"):
+        facts["line_customers"] = line["customers_approx"]
     if a["meta"]["fallback"] and message_type in FALLBACK_TEXT:
         text = FALLBACK_TEXT[message_type]
         validated = messages.validate(text, facts)

@@ -45,7 +45,9 @@ def template(message_type: str, facts: dict) -> str:
             "medium": "A storm is coming and outages are possible in your area.",
             "low": "A storm is coming. Outages in your area are not likely, but please be ready.",
         }[band]
-        return (f"{lead} If you lose power, our current estimate is {span} to restore it. "
+        line = (f" Your area is on a line serving about {facts['line_customers']:,} customers."
+                if facts.get("line_customers") else "")
+        return (f"{lead}{line} If you lose power, our current estimate is {span} to restore it. "
                 f"{facts['top_action']}")
     if message_type == "outage_confirmed":
         return (f"We've confirmed an outage in your area. Our current estimate is {span}. "

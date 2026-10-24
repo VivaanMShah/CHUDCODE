@@ -102,6 +102,21 @@ def _delta_text(base: dict, new: dict) -> str:
     return f"about {abs(d):.1f} hours {'faster' if d > 0 else 'slower'}"
 
 
+def histogram(samples: np.ndarray, bins: int = 12) -> list[dict]:
+    """Share of simulations in each time bucket, between the 2nd and 98th percentile."""
+    lo, hi = np.percentile(samples, [2, 98])
+    if hi - lo < 1e-6:
+        hi = lo + 1.0
+    counts, edges = np.histogram(np.clip(samples, lo, hi), bins=bins, range=(lo, hi))
+    total = max(int(counts.sum()), 1)
+    return [{"low_hours": float(round(edges[i], 1)), "high_hours": float(round(edges[i + 1], 1)),
+             "share": float(round(counts[i] / total, 3))} for i in range(bins)]
+
+
+# Scenario field names used in what-if patches (match the API's Scenario model).
+_FIELD = {"sev": "storm_severity", "poles": "damaged_poles", "crews": "crews", "access": "access_ok"}
+
+
 def estimate(feats: dict, store, scenario) -> dict:
     sim = Simulator()
     sev, poles, crews, access = (scenario.storm_severity, scenario.damaged_poles,
@@ -109,9 +124,10 @@ def estimate(feats: dict, store, scenario) -> dict:
 
     def go(sev=sev, poles=poles, crews=crews, access=access):
         lam = expected_damage(feats, store, sev, poles)
-        return summarize(sim.run(lam, poles > 0, min(crews, 50), access, sev)), lam
+        samples = sim.run(lam, poles > 0, min(crews, 50), access, sev)
+        return summarize(samples), lam, samples
 
-    base, lam = go()
+    base, lam, samples = go()
     variants = []
     if crews < 50:
         variants.append(("+1 crew", dict(crews=crews + 1)))
@@ -124,10 +140,12 @@ def estimate(feats: dict, store, scenario) -> dict:
         variants.append(("storm one level weaker", dict(sev=sev - 1)))
     deltas = []
     for label, kw in variants:
-        new, _ = go(**kw)
-        deltas.append({"change": label, "new_range": new, "delta_text": _delta_text(base, new)})
+        new, _, _ = go(**kw)
+        deltas.append({"change": label, "new_range": new, "delta_text": _delta_text(base, new),
+                       "scenario_patch": {_FIELD[k]: v for k, v in kw.items()}})
     spread = (base["high_hours"] - base["low_hours"]) / max(base["median_hours"], 1e-6)
-    return {"range": base, "deltas": deltas, "expected_damage": lam, "spread": spread}
+    return {"range": base, "deltas": deltas, "expected_damage": lam, "spread": spread,
+            "histogram": histogram(samples), "simulations": int(samples.size)}
 
 
 def spread_confidence(spread: float) -> str:

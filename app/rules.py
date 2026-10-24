@@ -15,10 +15,13 @@ SAFETY_LONG = "If you use a generator, keep it outside and at least 20 feet from
 SAFETY_FLOOD = "Do not walk or drive through water near downed lines."
 
 
-def actions_for(band: str, high_hours: float, needs: list[str], access_ok: bool) -> tuple[list[str], list[str]]:
+def actions_for(band: str, high_hours: float, needs: list[str], access_ok: bool,
+                backup_hours: float | None = None) -> tuple[list[str], list[str]]:
     actions: list[str] = []
     if "medical_equipment" in needs:
         actions.append("Confirm backup power for medical equipment, or plan where you will go if it runs out.")
+        if backup_hours is not None and high_hours > backup_hours:
+            actions.append("This outage could outlast your backup. Arrange a place with power now.")
     if "accessibility" in needs:
         actions.append("Ask a neighbor, friend, or family member to check on you during the storm.")
     if "critical_facility" in needs:
@@ -47,9 +50,14 @@ def actions_for(band: str, high_hours: float, needs: list[str], access_ok: bool)
     return actions[:6], safety
 
 
-def alert(band: str, high_hours: float, needs: list[str]) -> tuple[bool, str]:
-    if "medical_equipment" in needs and (band != "low" or high_hours > C.MEDICAL_BACKUP_HOURS / 2):
-        return True, "R2: declared medical equipment need and outage risk"
+def alert(band: str, high_hours: float, needs: list[str], backup_hours: float | None = None) -> tuple[bool, str]:
+    if "medical_equipment" in needs:
+        backup = backup_hours if backup_hours is not None else C.MEDICAL_BACKUP_HOURS
+        if high_hours > backup:
+            return True, (f"R2: declared medical equipment, and the outage could last longer than "
+                          f"your backup ({backup:g} hours)")
+        if band != "low":
+            return True, "R2: declared medical equipment need and outage risk"
     if band in ("medium", "high"):
         return True, "R1: risk band medium or high"
     if high_hours >= 24:
@@ -58,7 +66,10 @@ def alert(band: str, high_hours: float, needs: list[str]) -> tuple[bool, str]:
 
 
 def channel_and_timing(band: str, needs: list[str]) -> tuple[str, str]:
-    if "medical_equipment" in needs or "critical_facility" in needs:
+    if "medical_equipment" in needs:
+        # 24 hours earlier than the standard high-risk alert
+        return "phone_call", "Call 48 hours before the storm arrives"
+    if "critical_facility" in needs:
         return "phone_call", "Call 24 hours before the storm arrives"
     if band == "high":
         return "sms", "Send 24 hours before the storm arrives"
@@ -67,8 +78,11 @@ def channel_and_timing(band: str, needs: list[str]) -> tuple[str, str]:
     return "email", "Include in the daily storm update"
 
 
-def escalation(high_hours: float, needs: list[str]) -> dict:
+def escalation(high_hours: float, needs: list[str], backup_hours: float | None = None) -> dict:
     if "medical_equipment" in needs:
+        if backup_hours is not None:
+            return {"trigger": f"Outage expected to last longer than your backup ({backup_hours:g} hours)",
+                    "action": "Flag for a utility follow-up call"}
         return {"trigger": f"Outage expected to last longer than backup power (about {C.MEDICAL_BACKUP_HOURS} hours)",
                 "action": "Flag for a utility follow-up call"}
     if "critical_facility" in needs:
@@ -84,12 +98,13 @@ def escalation(high_hours: float, needs: list[str]) -> dict:
 def build(band: str, rng: dict, scenario) -> dict:
     needs = [n.value if hasattr(n, "value") else n for n in scenario.declared_needs]
     hi = rng["high_hours"]
-    actions, safety = actions_for(band, hi, needs, scenario.access_ok)
-    eligible, rule = alert(band, hi, needs)
+    backup = getattr(scenario, "backup_hours", None) if "medical_equipment" in needs else None
+    actions, safety = actions_for(band, hi, needs, scenario.access_ok, backup)
+    eligible, rule = alert(band, hi, needs, backup)
     channel, timing = channel_and_timing(band, needs)
     return {
         "customer_actions": {"actions": actions, "safety_messages": safety, "channel": channel,
-                             "send_timing": timing, "escalation": escalation(hi, needs)},
+                             "send_timing": timing, "escalation": escalation(hi, needs, backup)},
         "alert_eligible": eligible,
         "alert_rule": rule,
     }

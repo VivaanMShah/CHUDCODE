@@ -23,7 +23,7 @@ from . import config as C
 
 log = logging.getLogger("data")
 
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 
 # ARCOS asset type -> damage class used by the restoration engine.
 ARCOS_CLASS = {
@@ -236,7 +236,8 @@ def _build(store: Store) -> None:
     if C.FILES["topology"].exists() and premise_to_key:
         try:
             graph = nx.DiGraph()
-            behind = collections.Counter()   # customers behind each zone device
+            behind = collections.Counter()   # customers behind each device (any level)
+            chains_of_key = collections.defaultdict(collections.Counter)
             zone_of_key = collections.defaultdict(collections.Counter)
             depth_sum = collections.Counter()
             depth_n = collections.Counter()
@@ -257,7 +258,9 @@ def _build(store: Store) -> None:
                         graph.add_edge(a, b)  # downstream -> upstream
                     zone = next((c for c in chain if c[0].startswith("Recloser")), chain[-1])
                     zone_type = "recloser" if zone[0].startswith("Recloser") else "circuit breaker"
-                    behind[zone[1]] += 1
+                    for _, dev_id in chain:
+                        behind[dev_id] += 1
+                    chains_of_key[key][tuple(chain)] += 1
                     zone_of_key[key][(zone_type, zone[1])] += 1
                     depth_sum[key] += sum(1 for c in chain[1:] if c[0] != "Circuit Breaker")
                     depth_n[key] += 1
@@ -268,6 +271,7 @@ def _build(store: Store) -> None:
                     "upstream_device_type": ztype,
                     "customers_on_upstream_device": behind[zid],
                     "devices_to_breaker": depth_sum[key] / max(depth_n[key], 1),
+                    "upstream_chain": _chain_steps(chains_of_key[key].most_common(1)[0][0], behind),
                 }
             feats = feats.join(pd.DataFrame.from_dict(topo, orient="index"), how="left")
             store.report["topology"] = {"status": "ok", "rows": rows,
@@ -360,6 +364,35 @@ def mock_store(report: dict | None = None) -> Store:
     s.damage_mix = {"pole": 0.22, "primary_wire": 0.49, "secondary_wire": 0.08, "transformer": 0.05,
                     "fuse_switch": 0.24, "recloser": 0.0, "other_equipment": 0.0}
     return s
+
+
+def _device_label(raw: str) -> str:
+    r = raw.lower()
+    if r.startswith("circuit breaker"):
+        return "circuit breaker"
+    if r.startswith("recloser"):
+        return "recloser"
+    if r.startswith("fuse"):
+        return "fuse"
+    if r in ("distribution", "network"):
+        return "transformer"
+    return r
+
+
+def _approx(n: int) -> int:
+    """Round customer counts so they read as approximate, not exact."""
+    if n < 100:
+        return max(10, int(round(n, -1)))
+    return int(round(n / 50.0) * 50)
+
+
+def _chain_steps(chain: tuple, behind: collections.Counter) -> list[dict]:
+    """Typical chain for an area, from the substation breaker down to the transformer.
+    Device IDs are dropped here; only the type and an approximate customer count remain."""
+    steps = []
+    for raw_type, dev_id in reversed(chain):
+        steps.append({"device_type": _device_label(raw_type), "customers_approx": _approx(behind[dev_id])})
+    return steps
 
 
 def _signature() -> dict:

@@ -36,6 +36,10 @@ class Scenario(BaseModel):
         default_factory=list, max_length=3,
         description="Opt-in only. Never inferred.",
     )
+    backup_hours: Optional[float] = Field(
+        None, ge=0, le=168,
+        description="Opt-in: how long the customer's backup power lasts (used with medical_equipment).",
+    )
 
 
 class AssessRequest(BaseModel):
@@ -75,6 +79,14 @@ class FactorDelta(BaseModel):
     change: str
     new_range: RestorationRange
     delta_text: str
+    scenario_patch: Optional[dict] = Field(
+        None, description="Scenario fields to apply to try this change, e.g. {'crews': 4}")
+
+
+class HistogramBin(BaseModel):
+    low_hours: float
+    high_hours: float
+    share: float = Field(..., ge=0, le=1)
 
 
 class ModelEstimate(BaseModel):
@@ -87,6 +99,8 @@ class ModelEstimate(BaseModel):
     factor_deltas: List[FactorDelta]
     alert_eligible: bool
     alert_rule: str
+    restoration_histogram: Optional[List[HistogramBin]] = None
+    simulations: Optional[int] = None
 
 
 class Escalation(BaseModel):
@@ -109,6 +123,23 @@ class Meta(BaseModel):
     limits: List[str]
     data_mode: Literal["mock", "live"]
     request_id: str
+    backtest: Optional["Backtest"] = None
+
+
+class Backtest(BaseModel):
+    """Held-out check of the risk model on the largest storm in the records."""
+    event_label: str
+    areas: int
+    auc: float
+    high_band_hit_rate: Optional[float] = None   # share of areas rated high that had damage
+    low_band_hit_rate: Optional[float] = None    # share of areas rated low that had damage
+    high_band_areas: int = 0
+    low_band_areas: int = 0
+
+
+class ChainStep(BaseModel):
+    device_type: str
+    customers_approx: Optional[int] = None
 
 
 class AreaContext(BaseModel):
@@ -118,6 +149,7 @@ class AreaContext(BaseModel):
     upstream_device_type: Optional[str] = None
     customers_on_upstream_device_band: Optional[str] = None
     critical_facility_nearby: Optional[bool] = None
+    upstream_chain: Optional[List[ChainStep]] = None  # from the substation down to this area
 
 
 # ---------- responses ----------
@@ -159,3 +191,6 @@ class HealthResponse(BaseModel):
     files_loaded: int
     files_missing: List[str]
     backtest_auc: Optional[float] = None
+
+
+Meta.model_rebuild()

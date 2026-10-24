@@ -69,6 +69,29 @@ def test_all():
                     if mt == "outage_confirmed":
                         print(f"  msg {name}: {b['text']}")
 
+        # New optional features
+        b = c.post("/assess", json={"location_id": with_hist, "scenario": SEVERE}).json()
+        m = b["model_estimate"]
+        hist = m["restoration_histogram"]
+        assert hist and abs(sum(h["share"] for h in hist) - 1) < 0.02, "histogram shares"
+        assert m["simulations"] > 0
+        assert all(d["scenario_patch"] for d in m["factor_deltas"]), "what-if patches"
+        if h["data_mode"] == "live":
+            assert b["meta"]["backtest"]["auc"] > 0.5
+            assert b["area"]["upstream_chain"], "upstream chain"
+            assert b["area"]["upstream_chain"][0]["device_type"] == "circuit breaker"
+        assert b["customer_actions"]["send_timing"].startswith("Call 48"), "medical alerts go out earlier"
+        # Applying a what-if patch reproduces its range
+        d0 = m["factor_deltas"][0]
+        b2 = c.post("/assess", json={"location_id": with_hist,
+                                     "scenario": {**SEVERE, **d0["scenario_patch"]}}).json()
+        assert b2["model_estimate"]["restoration_range"] == d0["new_range"], "patch mismatch"
+        # Backup hours change escalation
+        short = {**SEVERE, "backup_hours": 2}
+        b3 = c.post("/assess", json={"location_id": with_hist, "scenario": short}).json()
+        assert "2 hours" in b3["customer_actions"]["escalation"]["trigger"]
+        print("new features ok: histogram, patches, chain, backtest, backup hours")
+
         assert c.post("/assess", json={"location_id": "LOC-999"}).status_code == 404
         assert c.post("/assess", json={"location_id": with_hist, "scenario": {"storm_severity": 9}}).status_code == 422
         assert c.post("/assess", json={"location_id": with_hist,

@@ -37,6 +37,7 @@ class RiskModel:
     brier: float | None = None
     base_rate: float | None = None
     n_train: int = 0
+    hit_rates: dict = field(default_factory=dict)  # held-out: share with damage, by predicted band
     coef: dict = field(default_factory=dict)
     means: dict = field(default_factory=dict)
     stds: dict = field(default_factory=dict)
@@ -75,6 +76,11 @@ def train(store: Store) -> RiskModel:
     m.brier = float(brier_score_loss(y, p_cv))
     m.base_rate = float(y.mean())
     m.n_train = int(len(y))
+    bands = np.array([_band(p) for p in p_cv])
+    for b in ("high", "low"):
+        sel = bands == b
+        m.hit_rates[b] = {"areas": int(sel.sum()),
+                          "rate": float(y[sel].mean()) if sel.any() else None}
     pipe.fit(X, y)
     m.pipe = pipe
     scaler, lr = pipe.steps[0][1], pipe.steps[1][1]
