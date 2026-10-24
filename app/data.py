@@ -469,6 +469,13 @@ def _signature() -> dict:
 
 def load() -> Store:
     t0 = time.time()
+    if C.BUNDLE.exists():  # Docker image: raw files are not shipped, only the processed store
+        with open(C.BUNDLE, "rb") as fh:
+            _, store = pickle.load(fh)
+        store.from_cache = True
+        store.load_seconds = round(time.time() - t0, 2)
+        log.info("data: loaded bundled store in %.2fs", store.load_seconds)
+        return store
     cache = C.CACHE_DIR / "store.pkl"
     sig = _signature()
     if cache.exists():

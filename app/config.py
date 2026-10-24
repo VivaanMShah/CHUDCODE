@@ -1,10 +1,20 @@
 """Paths and tunable constants. Placeholders are labeled so they show up in meta.assumptions."""
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+try:  # local runs: pick up AWS credentials and settings from .env. In AWS there is no .env.
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
+except ImportError:
+    pass
 DATA_DIR = ROOT / "data"
 CACHE_DIR = DATA_DIR / "_cache"
 LOG_DIR = ROOT / "logs"
+# In the Docker image only: processed data built from the raw files (about 150 KB).
+BUNDLE = Path(os.getenv("STORE_BUNDLE", ROOT / "bundle" / "store.pkl"))
 ZIP_TABLE = ROOT / "app" / "zip_centers.csv"   # public ZIP -> city + center point
 WEATHER_MODEL = ROOT / "app" / "weather_model.json"  # trained by python -m app.train_weather
 

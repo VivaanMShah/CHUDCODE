@@ -7,6 +7,7 @@
 
 import type {
   AssessResponse,
+  ChatResponse,
   MessageResponse,
   MessageType,
   Scenario,
@@ -44,6 +45,20 @@ export function lookupZip(zip: string, signal?: AbortSignal): Promise<ZipRespons
 // Live storm strength (1–5), next 12 hours, and National Weather Service alerts.
 export function getWeather(zip: string, signal?: AbortSignal): Promise<WeatherResponse> {
   return call<WeatherResponse>(`/weather/${encodeURIComponent(zip)}`, { signal });
+}
+
+// Ask the concierge. The server answers from the estimate's facts only and checks every number.
+export function askConcierge(
+  locationId: string,
+  scenario: Scenario,
+  question: string,
+  signal?: AbortSignal,
+): Promise<ChatResponse> {
+  return call<ChatResponse>("/chat", {
+    method: "POST",
+    body: JSON.stringify({ location_id: locationId, question, scenario }),
+    signal,
+  });
 }
 
 export function assess(

@@ -185,6 +185,21 @@ class LocationsResponse(BaseModel):
     data_mode: Literal["mock", "live"]
 
 
+class ChatRequest(BaseModel):
+    location_id: str = Field(..., max_length=32)
+    question: str = Field(..., min_length=1, max_length=300)
+    scenario: Scenario = Field(default_factory=Scenario)
+
+
+class ChatResponse(BaseModel):
+    location_id: str
+    answer: str
+    source: Literal["model", "template"]  # model = written by Bedrock and number-checked
+    validated: bool
+    suggestions: List[str]
+    meta: Meta
+
+
 class ZipResponse(BaseModel):
     zip: str
     location_id: str  # use this with /assess, /message, /weather

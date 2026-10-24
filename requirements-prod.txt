@@ -1,0 +1,10 @@
+# Runtime packages for the Docker image (no geospatial or training tools: the data is pre-processed)
+fastapi==0.162.0
+uvicorn==0.54.0
+pydantic==2.14.1
+numpy==2.5.4
+pandas==3.1.0
+scikit-learn==1.9.1
+scipy==1.18.1
+networkx==3.7
+boto3==1.43.118

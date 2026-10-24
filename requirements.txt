@@ -12,6 +12,9 @@ pyproj==3.8.0
 scikit-learn==1.9.1
 scipy==1.18.1
 networkx==3.7
+# Amazon Bedrock (chat and message polish) and local .env loading
+boto3==1.43.118
+python-dotenv==1.2.4
 # Tests (FastAPI TestClient)
 httpx==0.28.1
 # Not used by the API (kept from the original list). Drop them for a much smaller deploy.

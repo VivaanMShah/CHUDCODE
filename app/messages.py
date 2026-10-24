@@ -4,14 +4,16 @@ The LLM never produces numbers. It may only reword a template built from structu
 JSON. Every number in its output is checked against the numbers in that JSON; if any
 number doesn't match (or the LLM is off or fails), we return the template text.
 
-LLM polish is off unless LLM_POLISH=bedrock is set and boto3 + AWS credentials exist.
+LLM polish is off unless LLM_PROVIDER=bedrock is set (see app/llm.py).
 """
 from __future__ import annotations
 
 import json
 import logging
-import os
 import re
+from functools import lru_cache
+
+from . import llm
 
 log = logging.getLogger("messages")
 
@@ -91,25 +93,18 @@ def validate(text: str, facts: dict) -> bool:
     return all(n in ok for n in numbers_in(text))
 
 
-def _llm_reword(text: str, facts: dict) -> str | None:
-    if os.getenv("LLM_POLISH", "").lower() != "bedrock":
-        return None
-    try:
-        import boto3  # optional dependency
+@lru_cache(maxsize=256)
+def _llm_reword_cached(text: str, facts_json: str) -> str | None:
+    return llm.converse(
+        "Reword this utility customer message to sound warm and clear, in under 60 words. "
+        "Do not add, remove, or change any numbers. Reply with the message only.",
+        f"Facts (JSON): {facts_json}\n\nMessage: {text}", max_tokens=200, temperature=0.3)
 
-        client = boto3.client("bedrock-runtime", region_name=os.getenv("AWS_REGION", "us-east-1"))
-        prompt = ("Reword this utility customer message to sound warm and clear. Keep it under 60 words. "
-                  "Do not add, remove, or change any numbers. Reply with the message only.\n\n"
-                  f"Facts (JSON): {json.dumps(facts)}\n\nMessage: {text}")
-        resp = client.converse(
-            modelId=os.getenv("LLM_MODEL_ID", "anthropic.claude-haiku-4-5"),
-            messages=[{"role": "user", "content": [{"text": prompt}]}],
-            inferenceConfig={"maxTokens": 200, "temperature": 0.3},
-        )
-        return resp["output"]["message"]["content"][0]["text"].strip()
-    except Exception:  # noqa: BLE001 - polish is optional; template is the fallback
-        log.warning("messages: LLM polish failed, using template", exc_info=True)
+
+def _llm_reword(text: str, facts: dict) -> str | None:
+    if not llm.enabled():
         return None
+    return _llm_reword_cached(text, json.dumps(facts, sort_keys=True))
 
 
 def generate(message_type: str, facts: dict) -> tuple[str, bool, str]:

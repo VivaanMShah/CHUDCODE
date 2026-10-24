@@ -109,6 +109,15 @@ def test_all():
             check_privacy(za[1])
             print(f"zip ok: {zb['label']} | weather: severity={w['severity']} chance={w['chance_pct']}% "
                   f"alerts={None if w['alerts'] is None else len(w['alerts'])}")
+        # Chat: answers come from the estimate, numbers are checked, bad input is rejected
+        ch = c.post("/chat", json={"location_id": with_hist, "question": "How long could it last?", "scenario": SEVERE})
+        assert ch.status_code == 200, ch.text
+        chb = ch.json()
+        check_privacy(chb)
+        assert chb["validated"] and chb["source"] in ("model", "template") and chb["suggestions"]
+        assert c.post("/chat", json={"location_id": with_hist, "question": "x" * 301}).status_code == 422
+        assert c.post("/chat", json={"location_id": "LOC-999", "question": "hi"}).status_code == 404
+        print(f"chat ok ({chb['source']}): {chb['answer'][:70]}")
         assert c.get("/zip/99999").status_code == 404
         assert c.get("/zip/12ab5").status_code == 422
         assert c.post("/assess", json={"location_id": "ZIP-99999"}).status_code == 404

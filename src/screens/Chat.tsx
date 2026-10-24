@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { sendChatMessage } from "../api/samples";
+import { askConcierge } from "../api/backend";
+import { useAssessment } from "../assessment";
 import { useLocation } from "../location";
 import type { ChatMessage } from "../types";
 import "./Chat.css";
@@ -7,10 +8,10 @@ import "./Chat.css";
 const MAX_LENGTH = 500;
 
 const STARTER_QUESTIONS = [
-  "How bad will it get?",
-  "Should I evacuate?",
-  "Where is the nearest shelter?",
-  "What should I pack?",
+  "Will I lose power?",
+  "How long could it last?",
+  "What should I do now?",
+  "Why is my risk this level?",
 ];
 
 function timeNow(): string {
@@ -19,12 +20,13 @@ function timeNow(): string {
 
 export default function Chat() {
   const { location } = useLocation();
+  const { scenario } = useAssessment();
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "welcome",
       role: "assistant",
-      text: "Hi! I can answer questions about the weather near you: how bad a storm might get, whether to evacuate, where the closest shelter or hospital is, and how to prepare. What would you like to know?",
+      text: "Hi! Ask me about your outage risk, how long repairs could take, and how to get ready. My answers come only from your estimate, and every number is checked. In an emergency, call 911.",
       sentAt: timeNow(),
     },
   ]);
@@ -52,20 +54,19 @@ export default function Chat() {
       text: question,
       sentAt: timeNow(),
     };
-    const history = [...messages, userMessage];
-
-    setMessages(history);
+    setMessages((m) => [...m, userMessage]);
     setSuggestions([]);
     setDraft("");
     setWaiting(true);
 
     try {
-      const reply = await sendChatMessage(question, location, history);
+      if (!location) throw new Error("no ZIP");
+      const reply = await askConcierge(location.locationId, scenario, question);
       setMessages((m) => [
         ...m,
-        { id: nextId(), role: "assistant", text: reply.text, sentAt: timeNow() },
+        { id: nextId(), role: "assistant", text: reply.answer, sentAt: timeNow() },
       ]);
-      setSuggestions(reply.suggestions ?? []);
+      setSuggestions(reply.suggestions);
     } catch {
       setMessages((m) => [
         ...m,
@@ -92,7 +93,7 @@ export default function Chat() {
       <header className="chat__header">
         <div>
           <h1>Weather assistant</h1>
-          <p>Sample replies · not connected to the backend yet</p>
+          <p>Answers come from your estimate. Numbers are checked.</p>
         </div>
       </header>
 

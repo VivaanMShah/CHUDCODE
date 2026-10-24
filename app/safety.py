@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import sys
 import time
 import uuid
 
@@ -55,6 +57,9 @@ def _audit_logger():
         _audit = logging.getLogger("audit")
         _audit.setLevel(logging.INFO)
         _audit.propagate = False
+        if os.getenv("AUDIT_TO_STDOUT"):  # in AWS, stdout goes to CloudWatch Logs
+            _audit.addHandler(logging.StreamHandler(sys.stdout))
+            return _audit
         try:
             C.LOG_DIR.mkdir(parents=True, exist_ok=True)
             _audit.addHandler(logging.FileHandler(C.LOG_DIR / "audit.log", encoding="utf-8"))
@@ -89,5 +94,5 @@ def audit(endpoint: str, request_id: str, location_id: str | None, scenario, res
             "declared_needs_count": len(scenario.declared_needs),
         }
     if result:
-        entry.update({k: result.get(k) for k in ("risk_band", "fallback", "validated") if k in result})
+        entry.update({k: result.get(k) for k in ("risk_band", "fallback", "validated", "source") if k in result})
     _audit_logger().info(json.dumps(entry))

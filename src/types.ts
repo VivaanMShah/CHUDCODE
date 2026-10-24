@@ -1,7 +1,7 @@
 // ============================================================================
 // Nubus — shared types
 // UI-side shapes. Backend response shapes live in src/api/contract.ts;
-// weather shapes below are only used by the sample screens (src/api/samples.ts).
+// Chat message shape used by the Chat screen.
 // ============================================================================
 
 export type TabId = "home" | "radar" | "alerts" | "storm" | "chat";

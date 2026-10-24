@@ -181,3 +181,14 @@ export interface WeatherResponse {
   fallback_reason: string | null;
   model: { auc_out_of_time: number; damage_days: number; days: number } | null;
 }
+
+// ---- Chat ----------------------------------------------------------------------
+
+export interface ChatResponse {
+  location_id: string;
+  answer: string;
+  source: "model" | "template"; // model = written by Bedrock, every number checked
+  validated: boolean;
+  suggestions: string[];
+  meta: Meta;
+}

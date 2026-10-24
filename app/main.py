@@ -2,14 +2,18 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+from pathlib import Path as FsPath
 
-from fastapi import FastAPI, HTTPException, Path
+from fastapi import FastAPI, HTTPException, Path, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-from . import engine, safety, weather
-from .models import (AssessRequest, AssessResponse, HealthResponse, LocationsResponse,
+from . import chat, config, engine, safety, weather
+from .models import (AssessRequest, AssessResponse, ChatRequest, ChatResponse, HealthResponse, LocationsResponse,
                      MessageRequest, MessageResponse, WeatherResponse, ZipResponse)
 from .resolver import resolve
 
@@ -27,7 +31,39 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="AI Outage Concierge", version="1.0.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"], allow_headers=["*"])
+# Local dev allows any origin. In AWS the site and API share one address, so CORS_ORIGINS is empty there.
+_origins = [o for o in os.getenv("CORS_ORIGINS", "*").split(",") if o]
+app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_methods=["GET", "POST"], allow_headers=["*"])
+
+
+class StripApiPrefix:
+    """The website calls /api/...; the routes live at /... . Strip the prefix before routing."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"].startswith("/api/"):
+            scope = dict(scope, path=scope["path"][4:], raw_path=scope.get("raw_path", b"")[4:])
+        await self.inner(scope, receive, send)
+
+
+app.add_middleware(StripApiPrefix)
+
+_chat_hits: dict[str, deque] = defaultdict(deque)
+
+
+def _rate_limited(request: Request, limit: int = 20, window: float = 60.0) -> bool:
+    """Small per-visitor limit on /chat so one client can't run up the Bedrock bill."""
+    ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+          or (request.client.host if request.client else "?"))
+    now, q = time.time(), _chat_hits[ip]
+    while q and now - q[0] > window:
+        q.popleft()
+    if len(q) >= limit:
+        return True
+    q.append(now)
+    return False
 
 
 def _state() -> engine.State:
@@ -88,6 +124,26 @@ def message(req: MessageRequest):
     return out
 
 
+@app.post("/chat", response_model=ChatResponse)
+def chat_endpoint(req: ChatRequest, request: Request):
+    """Ask the concierge a question. The model answers from /assess facts only, numbers are checked.
+    The question text is never logged."""
+    t0, rid = time.time(), safety.new_request_id()
+    if _rate_limited(request):
+        raise HTTPException(429, "Too many questions. Please wait a minute and try again.")
+    s = _state()
+    loc = resolve(s.store, req.location_id)
+    wx = weather.live_weather(s.weather_model, loc.lat, loc.lon) if loc and loc.lat is not None else None
+    out = chat.answer(s, req.location_id, req.scenario, req.question, rid, wx)
+    if out is None:
+        safety.audit("/chat", rid, req.location_id, req.scenario, None, t0, 404)
+        raise HTTPException(404, f"Unknown location_id: {req.location_id}")
+    out = safety.scrub(out)
+    safety.audit("/chat", rid, req.location_id, req.scenario,
+                 {"fallback": out["meta"]["fallback"], "validated": out["validated"], "source": out["source"]}, t0)
+    return out
+
+
 ZIP_PATH = Path(..., pattern=r"^\d{5}$", description="5-digit ZIP code")
 
 
@@ -111,3 +167,9 @@ def live_weather(zip_code: str = ZIP_PATH):
     if loc is None:
         raise HTTPException(404, "We don't have outage data for that ZIP code yet.")
     return {"location_id": loc.location_id, **weather.live_weather(s.weather_model, loc.lat, loc.lon)}
+
+
+# The website (built by Docker). Must come last so API routes win.
+_static = FsPath(os.getenv("STATIC_DIR", str(config.ROOT / "dist")))
+if (_static / "index.html").exists():
+    app.mount("/", StaticFiles(directory=_static, html=True), name="web")
