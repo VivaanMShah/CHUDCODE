@@ -26,6 +26,16 @@ MAX_ITEMS, MAX_POLES = 12, 20
 PATH_ITEMS = [0.5, 1.0, 2.0, 3.0, 4.0]   # average damaged items on the path, for strength 1 to 5 (an assumption)
 
 
+# Labor model. Hours come from the organizer's labor workbook (Install_Labor_HackOHIO.xlsx).
+POLE_HOURS = 2.50 + 0.93          # pole, medium size: average install + removal crew-hours
+ITEM_HOURS = 0.87                 # other damaged item (crossarm, bracket, transformer, connector, lead, anchor): average of their install + removal hours
+INDIRECT_MULTIPLIER = 4.5         # workbook "ILM": drive time, safety talks, setup. One number, so travel and non-productive time are not split.
+ACCESS_ADDER_HOURS = 0.5 + 1.312  # workbook adders per item when access is hard: "access constraint" + "remote location"
+ROAD_CLEAR_HOURS = (3.0, 10.0)    # assumption: hours to clear blocked roads before repairs start
+REGION_ITEMS = [2, 5, 12, 28, 55]  # assumption: damaged items crews must repair across the area, for strength 1 to 5
+REFERENCE_CREWS = 2               # the real repair times reflect typical staffing, assumed to be this many crews
+
+
 def _poisson_draw(uniform: np.ndarray, average: float) -> np.ndarray:
     """Turns random numbers between 0 and 1 into whole counts that average `average` (a Poisson count)."""
     if average <= 1e-9:
@@ -50,10 +60,13 @@ class Draws:
         self.item_within_day = rng.random((size, MAX_ITEMS))     # where in the day it finished
         self.pole_pick = rng.random((size, MAX_POLES))
         self.pole_within_day = rng.random((size, MAX_POLES))
+        self.queue_position = rng.random(size)                   # where in the repair line this customer sits (0 = first)
+        self.road_clear_random = rng.random(size)                # how long blocked roads take to clear
         self.repair_days = np.array(analog["repair_days"], float)         # real repair times, in whole days
         self.pole_repair_days = np.array(analog["pole_repair_days"], float)
 
-    def hours_until_power_returns(self, severity: int, damaged_poles: int) -> np.ndarray:
+    def hours_until_power_returns(self, severity: int, damaged_poles: int,
+                                  crews: int = REFERENCE_CREWS, access_ok: bool = True) -> np.ndarray:
         """One result per simulated customer."""
         items_on_path = np.clip(_poisson_draw(self.count_random, PATH_ITEMS[severity - 1]), 1, MAX_ITEMS)
 
@@ -70,7 +83,15 @@ class Draws:
             # Each damaged pole the customer entered adds a repair drawn from real pole repair times.
             pole_days = self.pole_repair_days[(self.pole_pick[:, :poles] * len(self.pole_repair_days)).astype(int)]
             wait = np.maximum(wait, ((pole_days + self.pole_within_day[:, :poles]) * 24).max(axis=1))
-        return np.maximum(wait, 1.0)
+
+        # Crews and road access. The real repair times above reflect typical staffing, so we only add the
+        # difference: how long this customer waits in the repair line with these crews, minus with typical crews.
+        adder = 0.0 if access_ok else ACCESS_ADDER_HOURS
+        region_hours = lambda extra: (poles * (POLE_HOURS + extra) + REGION_ITEMS[severity - 1] * (ITEM_HOURS + extra)) * INDIRECT_MULTIPLIER
+        line_wait = self.queue_position * (region_hours(adder) / crews - region_hours(0.0) / REFERENCE_CREWS)
+        road_delay = 0.0 if access_ok else ROAD_CLEAR_HOURS[0] + (ROAD_CLEAR_HOURS[1] - ROAD_CLEAR_HOURS[0]) * self.road_clear_random
+        own_work = items_on_path * (ITEM_HOURS + adder) * INDIRECT_MULTIPLIER   # the repairs on this customer's own path
+        return np.maximum(wait + line_wait + road_delay, own_work + road_delay + 1.0)
 
 
 def summarize(hours: np.ndarray) -> dict:
@@ -99,30 +120,54 @@ def histogram(hours: np.ndarray, bins: int = 12) -> list[dict]:
              "share": float(round(counts[i] / total, 3))} for i in range(bins)]
 
 
+# Milestones for "will I outlast it?". Food-safety times are the USDA guidance: a closed fridge keeps food
+# safe about 4 hours, a full freezer about 48.
+MILESTONES = [(4, "Fridge food is still safe"), (12, "Overnight"), (24, "One full day"),
+              (48, "Full freezer is still safe"), (72, "Three days")]
+
+
+def odds_by_milestone(hours: np.ndarray) -> list[dict]:
+    """The chance power is back by each milestone, from the same simulated results as the range."""
+    return [{"hours": h, "chance": float(round((hours <= h).mean(), 3)), "label": label} for h, label in MILESTONES]
+
+
 def estimate_restoration(analog: dict, scenario) -> dict:
     """The restoration range, plus "what if" ranges: a weaker storm, a stronger one, half the poles."""
     draws = Draws(analog)
     strength, poles = scenario.storm_severity, scenario.damaged_poles
 
-    base_hours = draws.hours_until_power_returns(strength, poles)
+    
+    crews, access_ok = scenario.crews, scenario.access_ok
+
+    def run(**changes):
+        args = {"severity": strength, "damaged_poles": poles, "crews": crews, "access_ok": access_ok, **changes}
+        return draws.hours_until_power_returns(**args)
+
+    base_hours = run()
     base = summarize(base_hours)
 
-    what_ifs = []   # (label, storm strength to use, poles to use, scenario fields to change to try it)
+    what_ifs = []   # (label, arguments to change, scenario fields to change to try it)
+    if not access_ok:
+        what_ifs.append(("roads cleared", {"access_ok": True}, {"access_ok": True}))
+    if crews < 50:
+        what_ifs.append((f"{min(crews + 2, 50) - crews} more crews", {"crews": min(crews + 2, 50)}, {"crews": min(crews + 2, 50)}))
+    if crews > 1:
+        what_ifs.append(("one fewer crew", {"crews": crews - 1}, {"crews": crews - 1}))
     if strength > 1:
-        what_ifs.append(("storm one level weaker", strength - 1, poles, {"storm_severity": strength - 1}))
+        what_ifs.append(("storm one level weaker", {"severity": strength - 1}, {"storm_severity": strength - 1}))
     if strength < 5:
-        what_ifs.append(("storm one level stronger", strength + 1, poles, {"storm_severity": strength + 1}))
+        what_ifs.append(("storm one level stronger", {"severity": strength + 1}, {"storm_severity": strength + 1}))
     if poles > 1:
-        what_ifs.append(("half as many damaged poles", strength, poles // 2, {"damaged_poles": poles // 2}))
+        what_ifs.append(("half as many damaged poles", {"damaged_poles": poles // 2}, {"damaged_poles": poles // 2}))
 
     deltas = []
-    for label, what_if_strength, what_if_poles, patch in what_ifs:
-        new = summarize(draws.hours_until_power_returns(what_if_strength, what_if_poles))
+    for label, changes, patch in what_ifs:
+        new = summarize(run(**changes))
         deltas.append({"change": label, "new_range": new, "delta_text": _change_text(base, new), "scenario_patch": patch})
 
     spread = (base["high_hours"] - base["low_hours"]) / max(base["median_hours"], 1e-6)
     return {"range": base, "deltas": deltas, "spread": spread,
-            "histogram": histogram(base_hours), "simulations": int(base_hours.size)}
+            "histogram": histogram(base_hours), "odds": odds_by_milestone(base_hours), "simulations": int(base_hours.size)}
 
 
 def spread_confidence(spread: float) -> str:

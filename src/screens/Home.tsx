@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Band } from "../api/contract";
 import AboutEstimate from "../components/AboutEstimate";
+import OutlastCard from "../components/OutlastCard";
 import RangeBar from "../components/RangeBar";
 import { STORM_OPTIONS, StormArrival } from "../components/StormArrival";
 import {
@@ -160,6 +161,8 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
               {loading && <span className="hero__updating">Updating…</span>}
             </section>
 
+            {!quiet && <OutlastCard est={est} onTry={updateScenario} />}
+
             {/* Alert eligibility + next steps. With no storm, say so and stop. */}
             {quiet ? (
               <section className="card quiet-card">
@@ -249,6 +252,18 @@ export default function Home({ onOpenAlerts, onOpenPrepare }: HomeProps) {
                 <div className="scenario__label"><span>Damaged poles</span><strong>{scenario.damaged_poles}</strong></div>
                 <input type="range" min={0} max={60} value={scenario.damaged_poles}
                   onChange={(e) => updateScenario({ damaged_poles: Number(e.target.value) })} />
+              </label>
+
+              <label className="scenario__row">
+                <div className="scenario__label"><span>Repair crews</span><strong>{scenario.crews}</strong></div>
+                <input type="range" min={1} max={12} value={Math.min(scenario.crews, 12)}
+                  onChange={(e) => updateScenario({ crews: Number(e.target.value) })} />
+              </label>
+
+              <label className="scenario__row scenario__row--inline">
+                <div className="scenario__label"><span>Roads blocked by debris</span></div>
+                <input type="checkbox" checked={!scenario.access_ok}
+                  onChange={(e) => updateScenario({ access_ok: !e.target.checked })} />
               </label>
 
               <p className="details__small dim">

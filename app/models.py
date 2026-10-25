@@ -89,6 +89,12 @@ class HistogramBin(BaseModel):
     share: float = Field(..., ge=0, le=1)
 
 
+class RestorationOdd(BaseModel):
+    hours: int
+    chance: float = Field(..., ge=0, le=1)   # chance power is back by this many hours
+    label: str
+
+
 class ModelEstimate(BaseModel):
     risk_band: Band
     risk_score: float = Field(..., ge=0, le=1)
@@ -103,6 +109,7 @@ class ModelEstimate(BaseModel):
     simulations: Optional[int] = None
     similar_days: Optional[int] = None   # days in the records with a storm this strong (sample size behind the risk)
     times_normal: Optional[float] = None  # risk compared with a normal day
+    restoration_odds: Optional[List[RestorationOdd]] = None   # chance power is back by set hours
 
 
 class Escalation(BaseModel):

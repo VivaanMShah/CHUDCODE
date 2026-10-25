@@ -58,9 +58,6 @@ FILES = {
     "fire": DATA_DIR / "Data1" / "Fire_Stations_E_Pairwis_Clip.shp",
     "ambulance": DATA_DIR / "Data1" / "Ambulance_Servi_Pairwis_Clip.shp",
     "topology": DATA_DIR / "matched_upstream" / "matched_upstream.txt",
-    # Not in the data package yet. Restoration uses labeled placeholders until they arrive.
-    "storms_labor": DATA_DIR / "storms_labor_hours.xlsx",
-    "indirect_labor": DATA_DIR / "indirect_labor.xlsx",
 }
 
 # Projected CRS for distance math (UTM 17N covers the Roanoke service area).
@@ -666,9 +663,8 @@ def load() -> Store:
         _build(store)
     except Exception:  # noqa: BLE001 - never block startup
         log.exception("data: build failed, falling back to mock mode")
-    for k in ("storms_labor", "indirect_labor"):
-        store.report[k] = {"status": "missing", "rows": 0,
-                           "detail": "not in data package; restoration uses labeled placeholders"}
+    # Labor hours and the indirect-labor multiplier come from Install_Labor_HackOHIO.xlsx; they are
+    # copied into app/restoration.py (the package has no separate STORMS and indirect-labor files).
     store.load_seconds = round(time.time() - t0, 2)
     if store.live:
         try:

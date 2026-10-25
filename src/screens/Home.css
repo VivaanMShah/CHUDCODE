@@ -574,3 +574,28 @@
 }
 
 .simulate select { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--line, #2a3342); background: transparent; color: inherit; font: inherit; }
+
+/* Will I outlast it? */
+.outlast__sub { margin: 6px 0 10px; font-size: 13px; color: var(--text-dim); }
+.outlast__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.outlast__row {
+  display: grid;
+  grid-template-columns: 64px 1fr 40px;
+  grid-template-areas: "when bar pct" "label label label";
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 2px;
+}
+.outlast__when { grid-area: when; font-size: 13px; }
+.outlast__bar { grid-area: bar; height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.outlast__bar > span { display: block; height: 100%; border-radius: 4px; background: #6ea8fe; }
+.outlast__pct { grid-area: pct; font-family: var(--font-mono); font-size: 12px; text-align: right; }
+.outlast__label { grid-area: label; font-size: 11.5px; color: var(--text-dim); }
+.outlast__tries { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.outlast__try {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 10px 12px; border-radius: 10px; text-align: left; font-size: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.14); background: transparent; color: inherit; cursor: pointer;
+}
+.outlast__try small { font-size: 11.5px; color: var(--text-dim); }
+.outlast__note { margin: 12px 0 0; font-size: 11.5px; color: var(--text-dim); }

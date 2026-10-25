@@ -65,6 +65,12 @@ export interface HistogramBin {
   share: number; // 0–1
 }
 
+export interface RestorationOdd {
+  hours: number;
+  chance: number; // 0–1, chance power is back by this many hours
+  label: string;
+}
+
 export interface ModelEstimate {
   risk_band: Band;
   risk_score: number; // 0–1
@@ -79,6 +85,7 @@ export interface ModelEstimate {
   simulations?: number | null;
   similar_days?: number | null; // days in the records with a storm this strong
   times_normal?: number | null; // risk compared with a normal day
+  restoration_odds?: RestorationOdd[] | null;
 }
 
 export interface CustomerActions {

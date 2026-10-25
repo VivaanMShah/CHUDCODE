@@ -72,7 +72,7 @@ Errors: unknown `location_id` → `404`. Invalid input (for example `storm_sever
 ## GET /health
 
 ```json
-{ "status": "ok", "data_mode": "live", "files_loaded": 12, "files_missing": ["indirect_labor", "storms_labor"], "backtest_auc": 0.817 }
+{ "status": "ok", "data_mode": "live", "files_loaded": 13, "files_missing": [], "backtest_auc": 0.817 }
 ```
 
 ## GET /locations

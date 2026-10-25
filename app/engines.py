@@ -17,7 +17,8 @@ from .risk import (
     FALLBACK_ANALOG, RiskModel, area_risk, history_confidence,
     model_confidence, sample_confidence, train_risk,
 )
-from .restoration import estimate_restoration, spread_confidence
+from .restoration import (INDIRECT_MULTIPLIER, REFERENCE_CREWS, REGION_ITEMS, ROAD_CLEAR_HOURS,
+                          estimate_restoration, spread_confidence)
 from .rules import _needs_of, build_rules
 from .weather import live_weather, load_weather_model
 from .train_weather import SIGNIFICANT_REPORTS, train_weather
@@ -114,6 +115,11 @@ def _assumptions(state: State, scenario) -> list[str]:
         "Repair dates for other storms looked unreliable (many equal the date the data was pulled), so only that storm is used.",
         "How many damaged items sit between you and the substation is an assumption: about 1 on a calm day, up to 4 in a severe storm. "
         "Your power returns when the slowest of those repairs is done.",
+        f"Crews and roads: the real repair times reflect typical staffing, assumed to be {REFERENCE_CREWS} crews. More or fewer crews change "
+        "how long you wait in the repair line, using the labor workbook's hours per item times its indirect-labor multiplier "
+        f"({INDIRECT_MULTIPLIER:g}, which covers drive time, safety talks and setup). The workbook has one multiplier, so travel and non-productive time are not split.",
+        f"How many damaged items crews must repair across the area is an assumption ({REGION_ITEMS[0]} to {REGION_ITEMS[-1]} for strength 1 to 5). "
+        f"Blocked roads add {ROAD_CLEAR_HOURS[0]:g} to {ROAD_CLEAR_HOURS[1]:g} hours to clear them (assumed) plus the workbook's access adders per item.",
     ]
 
     if "medical_equipment" in _needs_of(scenario):
@@ -259,6 +265,7 @@ def assess(state: State, location_id: str, scenario, request_id: str) -> dict | 
             "alert_eligible": rules["alert_eligible"],
             "alert_rule": rules["alert_rule"],
             "restoration_histogram": restoration["histogram"],
+            "restoration_odds": restoration["odds"],
             "simulations": restoration["simulations"],
             "similar_days": risk["similar_days"],
             "times_normal": risk["times_normal"],
