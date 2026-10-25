@@ -2,9 +2,16 @@
 
 FastAPI backend for the HackOHI/O 2026 AEP challenge. A customer picks an anonymized location and a storm scenario; the API returns outage risk, a restoration time range, prep guidance, alert eligibility, and customer messages.
 
-**Status: live data.** All engines run on the organizer data in `./data/`. The risk model is backtested on the largest storm in the damage records (February 2025): **AUC 0.82 across 104 areas**. If the data files are missing, the app still starts in mock mode and every response sets `meta.fallback = true`.
+**Status: live data.** All engines run on the organizer data in `./data/`. The area-risk model uses random forest: **AUC 0.835 across 104 areas**, versus 0.816 for logistic regression on identical five-fold splits. Validation holds out areas within the February 2025 storm, not a separate future storm. See [training graphs](output/training/risk_training_comparison.png) and [MODEL_GUIDE.md](MODEL_GUIDE.md). If the data files are missing, the app still starts in mock mode and every response sets `meta.fallback = true`.
 
 ## Run locally
+
+### Editing the model
+
+See [MODEL_GUIDE.md](MODEL_GUIDE.md) for the file map, editable settings, examples,
+and offline tests. Prediction code is separated into `app/risk.py`,
+`app/restoration.py`, `app/rules.py`, and `app/weather.py`. Weather training is in
+`app/train_weather.py`; `app/engines.py` connects these steps to the API response.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -140,7 +147,7 @@ Request:
 }
 ```
 
-Response (real output, `factor_deltas` and `assumptions` trimmed):
+Historical response example from the earlier logistic model (`factor_deltas` and `assumptions` trimmed; current estimates differ):
 ```json
 {
   "location_id": "LOC-020",
@@ -265,7 +272,10 @@ Ranges over 48 hours are written in days ("about 4 to 17 days"). When `meta.fall
 | File | What's in it |
 |---|---|
 | `app/data.py` | **Settings** (paths, Monte Carlo size, labeled placeholders), the **data loader** (reads all shapefiles and the topology file at startup, checks columns, builds one feature row per circuit, caches to disk), and the **area lookup** (`LOC-012` or `ZIP-24014` to a circuit or a blended "typical circuit"). `python -m app.data` prints the schema report; `python -m app.data zips` rebuilds the ZIP table |
-| `app/engines.py` | The **risk model** (logistic regression on line miles, customers, past damage; backtested on the Feb 2025 storm), the **restoration simulation** (2000-draw Monte Carlo with a fixed seed, plus what-ifs and a histogram), the **rules** (tips, alert rules R0-R3, channel, timing, escalation), the **live weather model** and its training, and the **request orchestration** (confidence, fallback, confirmed facts, assumptions, limits). `python -m app.engines train-weather` retrains the weather model |
+| `app/engines.py` | Request orchestration, confidence, fallback, confirmed facts, assumptions, and limits |
+| `app/risk.py` | Random forest area exposure, held-out evaluation, and local sensitivity explanations; logistic regression remains available for comparison |
+| `app/restoration.py`, `app/rules.py` | Restoration simulation and customer advice / alert rules |
+| `app/weather.py`, `app/train_weather.py` | Logistic weather forecasts and training; `python -m app.engines train-weather` still works |
 | `app/assistant.py` | The **Bedrock helper**, **customer message** templates with the **number validator**, and the **chat** answers (facts-only prompt, template fallback) |
 | `app/main.py` | The **routes**, the **safety layer** (strips coordinates, internal codes, and sensitive keys from every response; audit log with ZIPs shortened to 3 digits), rate limit, and serving the website |
 | `app/models.py` | The API contract (pydantic). The source of truth for the JSON shape |

@@ -1,0 +1,21 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "C:/Users/Vivaan/AppData/Local/Temp/claude/C--Github-CHUDCODE/75377aa0-afa2-4e5a-b30e-9f6f5f6a3341/scratchpad/nodevenv/Scripts/node.exe",
+      "runtimeArgs": [
+        "C:/Users/Vivaan/AppData/Local/Temp/claude/C--Github-CHUDCODE/75377aa0-afa2-4e5a-b30e-9f6f5f6a3341/scratchpad/fe/node_modules/vite/bin/vite.js",
+        "C:/Users/Vivaan/AppData/Local/Temp/claude/C--Github-CHUDCODE/75377aa0-afa2-4e5a-b30e-9f6f5f6a3341/scratchpad/fe",
+        "--port", "5173", "--strictPort"
+      ],
+      "port": 5173
+    }
+  ]
+}

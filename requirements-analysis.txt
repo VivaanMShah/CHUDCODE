@@ -1,0 +1,2 @@
+# Optional plotting dependency; install after the application's dependencies.
+matplotlib==3.11.2
