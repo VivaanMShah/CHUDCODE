@@ -7,3 +7,4 @@
 __pycache__/
 *.pyc
 /logs
+.vscode/private-folder-alias.json
