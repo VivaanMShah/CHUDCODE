@@ -58,6 +58,7 @@ export default function ZipPicker() {
       <div className="picker__sheet">
         <header className="picker__header">
           <div>
+            {!location && <img className="picker__logo" src="/logo.png" alt="Storm Watch" width={56} height={56} />}
             <h2 id="picker-title">{location ? "Change ZIP code" : "What's your ZIP code?"}</h2>
             <p>
               {location
