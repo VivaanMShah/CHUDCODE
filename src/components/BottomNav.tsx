@@ -48,6 +48,12 @@ const icons: Record<TabId, ReactElement> = {
       <path d="m12 3 8 17-8-4-8 4 8-17Z" />
     </svg>
   ),
+  planner: (
+    <svg {...iconProps}>
+      <rect x="4" y="3.5" width="16" height="17" rx="2" />
+      <path d="M8 9h8M8 13h8M8 17h4" />
+    </svg>
+  ),
   chat: (
     <svg {...iconProps}>
       <path d="M20.5 11.5a7.5 7.5 0 0 1-10.9 6.7L4 19.5l1.4-4.3A7.5 7.5 0 1 1 20.5 11.5Z" />
@@ -62,6 +68,7 @@ const tabs: { id: TabId; label: string }[] = [
   { id: "alerts", label: "Alerts" },
   { id: "storm", label: "Prepare" },
   { id: "chat", label: "Chat" },
+  { id: "planner", label: "Planner" },
 ];
 
 export default function BottomNav({

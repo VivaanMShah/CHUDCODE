@@ -9,7 +9,7 @@
   bottom: 0;
   z-index: 10;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   height: var(--nav-height);
   padding-bottom: env(safe-area-inset-bottom, 0px);
   background: rgba(8, 13, 24, 0.92);

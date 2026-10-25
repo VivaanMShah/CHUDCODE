@@ -17,15 +17,15 @@ import sys
 import time
 import uuid
 
-from . import assistant, data, engines
+from . import assistant, data, engines, utility
 from .data import resolve
-from fastapi import FastAPI, HTTPException, Path, Request
+from fastapi import FastAPI, HTTPException, Path, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .models import (AlertConfig, AlertIdRequest, AlertSubscribeRequest, AlertSubscribed, AlertTestResult,
                      AssessRequest, AssessResponse, ChatRequest, ChatResponse, HealthResponse, LocationsResponse,
-                     MessageRequest, MessageResponse, WeatherResponse, ZipResponse)
+                     MessageRequest, MessageResponse, StagingResponse, WeakSpotsResponse, WeatherResponse, ZipResponse)
 
 # ============================================================================
 # SAFETY LAYER
@@ -129,6 +129,7 @@ STATE: engines.State | None = None
 async def lifespan(app: FastAPI):
     global STATE
     STATE = engines.startup()
+    asyncio.get_running_loop().run_in_executor(None, utility.warm, STATE)   # so the first staging request is fast
     loop = asyncio.create_task(_alert_loop())
     yield
     loop.cancel()
@@ -247,6 +248,28 @@ def chat_endpoint(req: ChatRequest, request: Request):
     out = scrub(out)
     audit("/chat", rid, req.location_id, req.scenario,
                  {"fallback": out["meta"]["fallback"], "validated": out["validated"], "source": out["source"]}, t0)
+    return out
+
+
+@app.get("/utility/staging", response_model=StagingResponse)
+def utility_staging(storm_severity: int = Query(3, ge=1, le=5)):
+    """Where to stage crews before a storm of this strength. ZIP codes and zone labels only."""
+    t0, rid = time.time(), new_request_id()
+    out = utility.staging(_state(), storm_severity)
+    out["meta"]["request_id"] = rid
+    out = scrub(out)
+    audit("/utility/staging", rid, None, None, {"fallback": out["meta"]["fallback"]}, t0)
+    return out
+
+
+@app.get("/utility/weak-spots", response_model=WeakSpotsResponse)
+def utility_weak_spots():
+    """The few protective devices behind most customer-hours lost in past storms. Types and areas only."""
+    t0, rid = time.time(), new_request_id()
+    out = utility.weak_spots(_state())
+    out["meta"]["request_id"] = rid
+    out = scrub(out)
+    audit("/utility/weak-spots", rid, None, None, {"fallback": out["meta"]["fallback"]}, t0)
     return out
 
 

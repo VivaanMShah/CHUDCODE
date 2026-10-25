@@ -11,6 +11,8 @@ import type {
   MessageResponse,
   MessageType,
   Scenario,
+  StagingResponse,
+  WeakSpotsResponse,
   WeatherResponse,
   ZipResponse,
 } from "./contract";
@@ -40,6 +42,15 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 // ZIP search: the only thing a customer types. Returns an area id, never coordinates.
 export function lookupZip(zip: string, signal?: AbortSignal): Promise<ZipResponse> {
   return call<ZipResponse>(`/zip/${encodeURIComponent(zip)}`, { signal });
+}
+
+// Utility planning views: where to stage crews before a storm, and which devices to harden.
+export function getStaging(stormSeverity: number, signal?: AbortSignal): Promise<StagingResponse> {
+  return call<StagingResponse>(`/utility/staging?storm_severity=${stormSeverity}`, { signal });
+}
+
+export function getWeakSpots(signal?: AbortSignal): Promise<WeakSpotsResponse> {
+  return call<WeakSpotsResponse>("/utility/weak-spots", { signal });
 }
 
 // Live storm strength (1–5), next 12 hours, and National Weather Service alerts.

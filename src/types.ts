@@ -4,7 +4,7 @@
 // Chat message shape used by the Chat screen.
 // ============================================================================
 
-export type TabId = "home" | "radar" | "alerts" | "storm" | "chat";
+export type TabId = "home" | "radar" | "alerts" | "storm" | "chat" | "planner";
 
 // ---- Alerts ----------------------------------------------------------------
 

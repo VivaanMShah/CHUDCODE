@@ -130,6 +130,18 @@ def test_all():
         assert c.post("/alerts/test", json={"id": sub.json()["id"]}).status_code == 404
         print("alerts ok: config, subscribe, bad-address guard, unsubscribe")
 
+        # Utility planner: staging scales with storm strength, weak spots are ranked, and nothing sensitive leaks.
+        mild, severe = (c.get(f"/utility/staging?storm_severity={s}").json() for s in (1, 5))
+        assert mild["available"] and severe["available"] and len(severe["zones"]) >= 2
+        assert severe["expected_total"] > mild["expected_total"]
+        assert 0 <= severe["travel"]["reduction_pct"] <= 100
+        weak = c.get("/utility/weak-spots").json()
+        assert weak["available"] and weak["top"][0]["rank"] == 1 and 0 < weak["top_share"] <= 1
+        blob = json.dumps([mild, severe, weak])
+        assert not re.search(r"STATION\d+|CIR\d+|\"lat\"|\"lon\"", blob)
+        assert c.get("/utility/staging?storm_severity=9").status_code == 422
+        print(f"planner ok: {severe['travel']['reduction_pct']}% less travel, top 5 devices = {round(weak['top_share'] * 100)}% of customer-hours")
+
         assert c.get("/zip/99999").status_code == 404
         assert c.get("/zip/12ab5").status_code == 422
         assert c.post("/assess", json={"location_id": "ZIP-99999"}).status_code == 404

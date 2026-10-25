@@ -205,3 +205,60 @@ export interface ChatResponse {
   suggestions: string[];
   meta: Meta;
 }
+
+// ---- Utility planning views (no coordinates, no device ids) ----------------
+
+export interface ZipHeat {
+  zip: string;
+  city: string;
+  heat: number; // 0–1, expected damage relative to the hottest ZIP
+  expected_customers: number;
+}
+
+export interface StagingZone {
+  label: string;
+  anchor_zip: string;
+  anchor_city: string;
+  zips: string[];
+  share_of_expected: number; // 0–1
+  expected_customers: number;
+}
+
+export interface TravelSaving {
+  depot_minutes: number;
+  staged_minutes: number;
+  reduction_pct: number;
+  depot_label: string;
+}
+
+export interface StagingResponse {
+  available: boolean;
+  headline: string;
+  storm_severity?: number | null;
+  zips: ZipHeat[];
+  zones: StagingZone[];
+  travel?: TravelSaving | null;
+  expected_total?: number | null;
+  meta: Meta;
+}
+
+export interface WeakSpot {
+  rank: number;
+  device_type: string;
+  area: string;
+  damage_count: number;
+  storms: number;
+  customers_below_approx: number;
+  avg_repair_hours: number;
+  share_of_customer_hours: number; // 0–1
+}
+
+export interface WeakSpotsResponse {
+  available: boolean;
+  headline: string;
+  top: WeakSpot[];
+  top_share?: number | null;
+  storms?: number | null;
+  devices_analyzed?: number | null;
+  meta: Meta;
+}

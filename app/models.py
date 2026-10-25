@@ -310,4 +310,62 @@ class HealthResponse(BaseModel):
     weather_model_auc: Optional[float] = None
 
 
+# ---------- utility planning views (staging and weak spots) ----------
+# Only public ZIP codes and area labels. No coordinates and no device ids.
+
+class ZipHeat(BaseModel):
+    zip: str
+    city: str
+    heat: float = Field(..., ge=0, le=1, description="Expected damage relative to the hottest ZIP")
+    expected_customers: float
+
+
+class StagingZone(BaseModel):
+    label: str
+    anchor_zip: str
+    anchor_city: str
+    zips: List[str]
+    share_of_expected: float
+    expected_customers: float
+
+
+class TravelSaving(BaseModel):
+    depot_minutes: int
+    staged_minutes: int
+    reduction_pct: int
+    depot_label: str
+
+
+class StagingResponse(BaseModel):
+    available: bool
+    headline: str
+    storm_severity: Optional[int] = None
+    zips: List[ZipHeat] = []
+    zones: List[StagingZone] = []
+    travel: Optional[TravelSaving] = None
+    expected_total: Optional[float] = None
+    meta: Meta
+
+
+class WeakSpot(BaseModel):
+    rank: int
+    device_type: str
+    area: str
+    damage_count: int
+    storms: int
+    customers_below_approx: int
+    avg_repair_hours: int
+    share_of_customer_hours: float
+
+
+class WeakSpotsResponse(BaseModel):
+    available: bool
+    headline: str
+    top: List[WeakSpot] = []
+    top_share: Optional[float] = None
+    storms: Optional[int] = None
+    devices_analyzed: Optional[int] = None
+    meta: Meta
+
+
 Meta.model_rebuild()

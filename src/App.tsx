@@ -8,6 +8,7 @@ import { ProfileProvider } from "./profile";
 import Alerts from "./screens/Alerts";
 import Chat from "./screens/Chat";
 import Home from "./screens/Home";
+import Planner from "./screens/Planner";
 import Radar from "./screens/Radar";
 import Storm from "./screens/Storm";
 import type { TabId } from "./types";
@@ -26,6 +27,7 @@ function AppShell() {
       {tab === "alerts" && <Alerts />}
       {tab === "storm" && <Storm />}
       {tab === "chat" && <Chat />}
+      {tab === "planner" && <Planner />}
 
       <BottomNav active={tab} onChange={setTab} alertCount={alertCount} />
 

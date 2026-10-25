@@ -63,6 +63,12 @@ FILES = {
 # Projected CRS for distance math (UTM 17N covers the Roanoke service area).
 METRIC_CRS = "EPSG:32617"
 
+# A damage record counts as belonging to a protective device if one of that type is within this distance.
+WEAK_SPOT_MATCH_M = 100
+WEAK_SPOT_DEVICES = {"Fuse Bank": ("fuses", "fuse"), "Recloser Bank": ("reclosers", "recloser"), "Switch": ("switches", "switch")}
+WEAK_SPOT_MAX_REPAIR_DAYS = 14   # repair dates beyond this look like bulk closing, not real repair times
+WEAK_SPOT_KEEP = 100   # how many of the worst devices to keep
+
 # Locations: one per circuit with at least this many customers.
 MIN_CUSTOMERS_PER_LOCATION = 50
 
@@ -89,7 +95,7 @@ MEDICAL_BACKUP_HOURS = 8
 
 log = logging.getLogger("data")
 
-CACHE_VERSION = 7
+CACHE_VERSION = 10
 
 # ARCOS asset type -> damage class used by the restoration engine.
 ARCOS_CLASS = {
@@ -130,6 +136,9 @@ class Store:
     arcos: pd.DataFrame | None = None                # damage records, no coordinates
     reference_event: dict | None = None              # largest storm in history
     events: list = field(default_factory=list)
+    weak_spots: pd.DataFrame | None = None           # worst protective devices by customer-hours lost (no ids, no coordinates)
+    weak_summary: dict = field(default_factory=dict)  # totals behind the weak-spot shares
+    device_customers: dict | None = None             # device id -> customers below it; only used while building, then dropped
     damage_mix: dict = field(default_factory=dict)   # system-wide damage class share in the reference event
     load_seconds: float = 0.0
     from_cache: bool = False
@@ -247,6 +256,9 @@ def _build(store: Store) -> None:
     if history is not None:
         features = features.join(history, how="left")
 
+    _weak_spots(store)
+    store.device_customers = None   # internal ids, not kept
+
     if not len(features):
         return
 
@@ -343,7 +355,20 @@ def _line_features(store: Store):
         "primary_miles": by_circuit.report_len.sum() / 5280.0,  # the file stores feet
         "backbone_share": by_circuit.usage.agg(lambda s: (s == "Backbone").mean()),
     })
-    return features, lines[["key", "geometry"]].to_crs(METRIC_CRS)
+    lines_m = lines[["key", "geometry"]].to_crs(METRIC_CRS)
+
+    # A rough center for each circuit (the length-weighted middle of its lines), used server-side only to plan
+    # crew staging. It is never returned by the API.
+    import geopandas as gpd
+
+    middle = lines_m.geometry.centroid
+    length = lines_m.geometry.length
+    total_length = length.groupby(lines_m.key).sum()
+    x = (middle.x * length).groupby(lines_m.key).sum() / total_length
+    y = (middle.y * length).groupby(lines_m.key).sum() / total_length
+    centers = gpd.GeoSeries(gpd.points_from_xy(x.values, y.values), index=x.index, crs=METRIC_CRS).to_crs("EPSG:4326")
+    features["center_lat"], features["center_lon"] = centers.y, centers.x
+    return features, lines_m
 
 
 def _pole_features(store: Store, lines_in_meters):
@@ -444,6 +469,7 @@ def _topology_features(store: Store, premise_to_circuit: dict):
                 "upstream_chain": _chain_steps(typical_chain, customers_behind),
             }
         store.report["topology"] = {"status": "ok", "rows": rows, "detail": f"{len(seen_devices)} devices"}
+        store.device_customers = dict(customers_behind)
         return pd.DataFrame.from_dict(per_circuit, orient="index")
     except Exception as error:  # noqa: BLE001 - a bad topology file must not stop the app
         store.report["topology"] = {"status": "error", "rows": 0, "detail": str(error)[:200]}
@@ -498,6 +524,72 @@ def _damage_history(store: Store):
     store.damage_mix = {c: float(mix.get(c, 0.0)) for c in DAMAGE_CLASSES}
     store.arcos = records[["key", "Report_Tim", "Repaired", "damage_class", "Access_Iss", "event_id", "repair_days"]]
     return history
+
+
+def _weak_spots(store: Store) -> None:
+    """Step 9. Which protective devices lost the most customer-hours in past storms.
+
+    Each ARCOS damage record on a fuse, recloser or switch is matched to the nearest device of that type.
+    Customers below the device come from the topology file. Customer-hours for one record =
+    customers below x hours the repair took. Coordinates and device ids are used here and then dropped."""
+    import geopandas as gpd
+
+    behind = store.device_customers
+    if not behind:
+        return
+    cols = ["Substation", "Circuit", "Report_Tim", "Repaired", "Repaired_D", "Asset_Type", "Longitude", "Latitude"]
+    records = _read(store, "arcos", columns=cols)
+    if records is None or not {"Longitude", "Latitude"} <= set(records.columns):
+        return
+    try:
+        records = records[records.Asset_Type.isin(WEAK_SPOT_DEVICES)].dropna(subset=["Longitude", "Latitude", "Report_Tim"]).copy()
+        events = _events(records.Report_Tim)
+        event_of_day = {day: e["id"] for e in events for day in pd.date_range(e["start"], e["end"])}
+        records["event_id"] = records.Report_Tim.dt.normalize().map(event_of_day)
+        days = (records.Repaired_D - records.Report_Tim).dt.days
+        days = days.where((records.Repaired == "Yes") & days.between(0, WEAK_SPOT_MAX_REPAIR_DAYS))   # slower "repairs" look bulk-closed, so treat them as unknown
+        records["repair_days"] = days.fillna(days.groupby(records.Asset_Type).transform("median"))
+        records["hours"] = records.repair_days.clip(lower=0.5) * 24                  # dates have day precision
+
+        points = gpd.GeoDataFrame(records, geometry=gpd.points_from_xy(records.Longitude, records.Latitude), crs="EPSG:4326").to_crs(METRIC_CRS)
+        matched = []
+        for asset, (layer, kind) in WEAK_SPOT_DEVICES.items():
+            devices = _read(store, layer, columns=["location_n", "aep_statio", "aep_circui"], geometry=True)
+            if devices is None or "location_n" not in devices:
+                continue
+            devices = devices.dropna(subset=["location_n"]).to_crs(METRIC_CRS)
+            near = gpd.sjoin_nearest(points[points.Asset_Type == asset], devices[["location_n", "geometry"]],
+                                     how="inner", max_distance=WEAK_SPOT_MATCH_M, distance_col="dist")
+            near = near.sort_values("dist")
+            near = near[~near.index.duplicated(keep="first")]                          # one device per damage record
+            near["kind"] = kind
+            matched.append(near)
+        if not matched:
+            return
+        hits = pd.concat(matched)
+        hits["customers"] = hits.location_n.map(behind).fillna(0)
+        hits = hits[hits.customers > 0]
+        hits["customer_hours"] = hits.customers * hits.hours
+        hits["key"] = _key(hits.Substation, hits.Circuit)
+
+        by_device = hits.groupby(["kind", "location_n", "key"], as_index=False).agg(
+            damage_count=("hours", "size"), storms=("event_id", "nunique"), customers_below=("customers", "first"),
+            avg_repair_hours=("hours", "mean"), customer_hours=("customer_hours", "sum"))
+        by_device = by_device.sort_values("customer_hours", ascending=False)
+        store.weak_summary = {
+            "total_customer_hours": float(by_device.customer_hours.sum()),
+            "devices_with_damage": int(len(by_device)),
+            "damage_records_matched": int(len(hits)),
+            "damage_records_device_type": int(len(records)),
+            "storms": int(hits.event_id.nunique()),
+            "first_storm": hits.Report_Tim.min().strftime("%B %Y"),
+            "last_storm": hits.Report_Tim.max().strftime("%B %Y"),
+        }
+        store.weak_spots = by_device.drop(columns="location_n").head(WEAK_SPOT_KEEP).reset_index(drop=True)   # no device ids
+        store.report["weak_spots"] = {"status": "ok", "rows": len(by_device), "detail": f"{len(hits)} damage records matched"}
+    except Exception as error:  # noqa: BLE001 - this feature is optional
+        store.report["weak_spots"] = {"status": "error", "rows": 0, "detail": str(error)[:200]}
+        log.exception("data: weak-spot step failed")
 
 
 def _make_locations(store: Store, features: pd.DataFrame, zip_counts) -> None:
